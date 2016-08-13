@@ -4,7 +4,7 @@
 # To bootstrap from scratch, set the channel and date from src/stage0.txt
 # e.g. 1.10.0 wants rustc: 1.9.0-2016-05-24
 # or nightly wants some beta-YYYY-MM-DD
-%bcond_without bootstrap
+%bcond_with bootstrap
 %global bootstrap_channel 1.9.0
 %global bootstrap_date 2016-05-24
 
@@ -20,7 +20,7 @@
 
 Name:           rust
 Version:        1.10.0
-Release:        3%{?dist}
+Release:        4%{?dist}
 Summary:        The Rust Programming Language
 License:        (ASL 2.0 or MIT) and (BSD and ISC and MIT)
 # ^ written as: (rust itself) and (bundled libraries)
@@ -259,6 +259,9 @@ make check-lite VERBOSE=1 -k || echo "make check-lite exited with code $?"
 
 
 %changelog
+* Sat Aug 13 2016 Josh Stone <jistone@redhat.com> 1.10.0-4
+- Rebuild without bootstrap binaries.
+
 * Fri Aug 12 2016 Josh Stone <jistone@redhat.com> - 1.10.0-3
 - Initial import into Fedora (#1356907), bootstrapped
 - Format license text as suggested in review.
