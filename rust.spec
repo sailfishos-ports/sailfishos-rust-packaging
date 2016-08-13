@@ -121,10 +121,10 @@ programs.
 
 %package doc
 Summary:        Documentation for Rust
-BuildArch:      noarch
+# NOT BuildArch:      noarch
 # Note, while docs are mostly noarch, some things do vary by target_arch.
-# These are few though, so for now we won't worry about it.  FWIW, upstream's
-# doc.rust-lang.org is only generated on Linux x86_64.
+# Koji will fail the build in rpmdiff if two architectures build a noarch
+# subpackage differently, so instead we have to keep its arch.
 
 %description doc
 This package includes HTML documentation for the Rust programming language and
@@ -259,13 +259,13 @@ make check-lite VERBOSE=1 -k || echo "make check-lite exited with code $?"
 
 
 %changelog
-* Thu Aug 11 2016 Josh Stone <jistone@redhat.com> - 1.10.0-3
+* Fri Aug 12 2016 Josh Stone <jistone@redhat.com> - 1.10.0-3
 - Initial import into Fedora (#1356907), bootstrapped
 - Format license text as suggested in review.
-- Make -doc noarch for now, despite small variations.
 - Note how the tests already run in parallel.
 - Undefine _include_minidebuginfo, because it duplicates ".note.rustc".
 - Don't let checks fail the whole build.
+- Note that -doc can't be noarch, as rpmdiff doesn't allow variations.
 
 * Tue Jul 26 2016 Josh Stone <jistone@redhat.com> - 1.10.0-2
 - Update -doc directory ownership, and mark its licenses.
