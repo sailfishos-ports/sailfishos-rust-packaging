@@ -5,22 +5,24 @@
 # e.g. 1.10.0 wants rustc: 1.9.0-2016-05-24
 # or nightly wants some beta-YYYY-MM-DD
 %bcond_with bootstrap
-%global bootstrap_channel 1.9.0
-%global bootstrap_date 2016-05-24
+%global bootstrap_channel 1.10.0
+%global bootstrap_date 2016-07-05
 
 # Use "rebuild" when building with a distro rustc of the same version.
 # Turn this off when the distro has the prior release, matching bootstrap.
-%bcond_without rebuild
+# Note, 1.12 will be able to autodetect this via PR34779.
+%bcond_with rebuild
 
 # The script for minidebuginfo copies symbols and *notes* into a "mini"
 # ELF object compressed into the .gnu_debugdata section.  This includes our
 # relatively large .note.rustc metadata, bloating every library.  Eventually
 # that metadata should be stripped beforehand -- see rust #23366 and #26764.
+# Note, 1.12 will move to unallocated data via PR35409, then can be stripped.
 %undefine _include_minidebuginfo
 
 Name:           rust
-Version:        1.10.0
-Release:        4%{?dist}
+Version:        1.11.0
+Release:        1%{?dist}
 Summary:        The Rust Programming Language
 License:        (ASL 2.0 or MIT) and (BSD and ISC and MIT)
 # ^ written as: (rust itself) and (bundled libraries)
@@ -48,19 +50,10 @@ ExclusiveArch:  x86_64 i686
 %ifarch armv7hl
 %global rust_triple armv7-unknown-linux-gnueabihf
 %else
-%define rust_triple %{_target_cpu}-unknown-linux-gnu
+%global rust_triple %{_target_cpu}-unknown-linux-gnu
 %endif
 
-# merged for 1.11.0: https://github.com/rust-lang/rust/pull/33787
-Patch1:         rust-pr33787-enable-local-rebuild.patch
-
-# merged for 1.11.0: https://github.com/rust-lang/rust/pull/33798
-Patch2:         rust-pr33798-miniz-misleading-indentation.patch
-
-# merged for 1.11.0: https://github.com/rust-lang/hoedown/pull/6
-# via https://github.com/rust-lang/rust/pull/33988
-# (but eventually we should ditch this bundled hoedown)
-Patch3:         rust-hoedown-pr6-misleading-indentation.patch
+Patch1:         rust-1.11.0-no-bootstrap-download.patch
 
 BuildRequires:  make
 BuildRequires:  cmake
@@ -84,8 +77,18 @@ BuildRequires:  %{name} >= %{bootstrap_channel}
 # make check: src/test/run-pass/wait-forked-but-failed-child.rs
 BuildRequires:  /usr/bin/ps
 
-# TODO: work on unbundling these!
+# Rust started using cmake for its bundled compiler-rt, but this requires
+# llvm-static to be installed.  But then llvm-config starts printing flags
+# for static linkage, with no way to force it shared.
+#
+# For now, we'll bypass all that and just use the distro build.  Then in the
+# next release, Rust is moving toward a true fork of these builtins, with the
+# eventual goal of rewriting them in Rust proper.
+BuildRequires:  compiler-rt
 Provides:       bundled(compiler-rt) = 3.8
+%global clang_builtins %{_libdir}/clang/3.8.0/lib/libclang_rt.builtins-%{_target_cpu}.a
+
+# TODO: work on unbundling these!
 Provides:       bundled(hoedown) = 3.0.5
 Provides:       bundled(jquery) = 2.1.4
 Provides:       bundled(libbacktrace) = 6.1.0
@@ -138,12 +141,11 @@ its standard library.
 %prep
 %setup -q -n %{rustc_package}
 
-%patch1 -p1 -b .rebuild
-%patch2 -p1 -b .miniz-indent
-%patch3 -p1 -d src/rt/hoedown/ -b .hoedown-indent
+%patch1 -p1 -b .no-download
 
 # unbundle
 rm -rf src/llvm/ src/jemalloc/
+rm -rf src/compiler-rt/
 
 # extract bundled licenses for packaging
 cp src/rt/hoedown/LICENSE src/rt/hoedown/LICENSE-hoedown
@@ -178,12 +180,16 @@ cp -t dl/ %{SOURCE1} %{SOURCE2} # %{SOURCE3} %{SOURCE4}
 %build
 %configure --disable-option-checking \
   --build=%{rust_triple} --host=%{rust_triple} --target=%{rust_triple} \
-  %{!?with_bootstrap:--enable-local-rust %{?with_rebuild:--enable-local-rebuild}} \
-  --llvm-root=/usr --disable-codegen-tests \
+  %{!?with_bootstrap:--enable-local-rust --local-rust-root=%{_prefix} %{?with_rebuild:--enable-local-rebuild}} \
+  --llvm-root=%{_prefix} --disable-codegen-tests \
   --disable-jemalloc \
   --disable-rpath \
   --enable-debuginfo \
   --release-channel=%{channel}
+
+# Bypass the compiler-rt build -- see above.
+cp %{clang_builtins} ./%{rust_triple}/rt/libcompiler-rt.a
+
 %make_build VERBOSE=1
 
 
@@ -259,6 +265,13 @@ make check-lite VERBOSE=1 -k || echo "make check-lite exited with code $?"
 
 
 %changelog
+* Wed Aug 24 2016 Josh Stone <jistone@redhat.com> - 1.11.0-1
+- Update to 1.11.0.
+- Drop the backported patches.
+- Patch get-stage0.py to trust existing bootstrap binaries.
+- Use libclang_rt.builtins from compiler-rt, dodging llvm-static issues.
+- Use --local-rust-root to make sure the right bootstrap is used.
+
 * Sat Aug 13 2016 Josh Stone <jistone@redhat.com> 1.10.0-4
 - Rebuild without bootstrap binaries.
 
