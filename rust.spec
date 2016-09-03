@@ -4,14 +4,14 @@
 # To bootstrap from scratch, set the channel and date from src/stage0.txt
 # e.g. 1.10.0 wants rustc: 1.9.0-2016-05-24
 # or nightly wants some beta-YYYY-MM-DD
-%bcond_with bootstrap
+%bcond_without bootstrap
 %global bootstrap_channel 1.10.0
 %global bootstrap_date 2016-07-05
 
 # Use "rebuild" when building with a distro rustc of the same version.
 # Turn this off when the distro has the prior release, matching bootstrap.
 # Note, 1.12 will be able to autodetect this via PR34779.
-%bcond_with rebuild
+%bcond_without rebuild
 
 # The script for minidebuginfo copies symbols and *notes* into a "mini"
 # ELF object compressed into the .gnu_debugdata section.  This includes our
@@ -22,7 +22,7 @@
 
 Name:           rust
 Version:        1.11.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        The Rust Programming Language
 License:        (ASL 2.0 or MIT) and (BSD and ISC and MIT)
 # ^ written as: (rust itself) and (bundled libraries)
@@ -39,14 +39,13 @@ Source0:        https://static.rust-lang.org/dist/%{rustc_package}-src.tar.gz
 %global bootstrap_base https://static.rust-lang.org/dist/%{bootstrap_date}/rustc-%{bootstrap_channel}
 Source1:        %{bootstrap_base}-x86_64-unknown-linux-gnu.tar.gz
 Source2:        %{bootstrap_base}-i686-unknown-linux-gnu.tar.gz
-#Source3:        %{bootstrap_base}-armv7-unknown-linux-gnueabihf.tar.gz
+Source3:        %{bootstrap_base}-armv7-unknown-linux-gnueabihf.tar.gz
 #Source4:        %{bootstrap_base}-aarch64-unknown-linux-gnu.tar.gz
 %endif
 
 # Only x86_64 and i686 are Tier 1 platforms at this time.
 # https://doc.rust-lang.org/stable/book/getting-started.html#tier-1
-ExclusiveArch:  x86_64 i686
-#ExclusiveArch:  x86_64 i686 armv7hl aarch64
+ExclusiveArch:  x86_64 i686 armv7hl
 %ifarch armv7hl
 %global rust_triple armv7-unknown-linux-gnueabihf
 %else
@@ -54,6 +53,9 @@ ExclusiveArch:  x86_64 i686
 %endif
 
 Patch1:         rust-1.11.0-no-bootstrap-download.patch
+
+# merged for 1.13.0
+Patch2:         rust-pr35814-armv7-no-neon.patch
 
 BuildRequires:  make
 BuildRequires:  cmake
@@ -86,7 +88,11 @@ BuildRequires:  /usr/bin/ps
 # eventual goal of rewriting them in Rust proper.
 BuildRequires:  compiler-rt
 Provides:       bundled(compiler-rt) = 3.8
+%ifarch armv7hl
+%global clang_builtins %{_libdir}/clang/3.8.0/lib/libclang_rt.builtins-armhf.a
+%else
 %global clang_builtins %{_libdir}/clang/3.8.0/lib/libclang_rt.builtins-%{_target_cpu}.a
+%endif
 
 # TODO: work on unbundling these!
 Provides:       bundled(hoedown) = 3.0.5
@@ -142,6 +148,7 @@ its standard library.
 %setup -q -n %{rustc_package}
 
 %patch1 -p1 -b .no-download
+%patch2 -p1 -b .no-neon
 
 # unbundle
 rm -rf src/llvm/ src/jemalloc/
@@ -173,7 +180,7 @@ sed -i.libdir -e '/^HLIB_RELATIVE/s/lib$/$$(CFG_LIBDIR_RELATIVE)/' mk/main.mk
 
 %if %with bootstrap
 mkdir -p dl/
-cp -t dl/ %{SOURCE1} %{SOURCE2} # %{SOURCE3} %{SOURCE4}
+cp -t dl/ %{?SOURCE1} %{?SOURCE2} %{?SOURCE3} %{?SOURCE4}
 %endif
 
 
@@ -265,6 +272,9 @@ make check-lite VERBOSE=1 -k || echo "make check-lite exited with code $?"
 
 
 %changelog
+* Fri Sep 02 2016 Josh Stone <jistone@redhat.com> - 1.11.0-2
+- Bootstrap armv7hl, with backported no-neon patch.
+
 * Wed Aug 24 2016 Josh Stone <jistone@redhat.com> - 1.11.0-1
 - Update to 1.11.0.
 - Drop the backported patches.
