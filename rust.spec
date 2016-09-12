@@ -170,7 +170,7 @@ sed -i.jemalloc -e '1i // ignore-test jemalloc is disabled' \
   src/test/run-pass/allocator-default.rs
 
 # Fedora's LLVM doesn't support any mips targets -- see "llc -version".
-# Fixed properly by Rust PR35344, which should be released in 1.13.
+# Fixed properly by Rust PR36344, which should be released in 1.13.
 sed -i.nomips -e '/target=mips/,+1s/^/# unsupported /' \
   src/test/run-make/atomic-lock-free/Makefile
 
