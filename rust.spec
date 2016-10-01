@@ -5,24 +5,12 @@
 # e.g. 1.10.0 wants rustc: 1.9.0-2016-05-24
 # or nightly wants some beta-YYYY-MM-DD
 %bcond_with bootstrap
-%global bootstrap_channel 1.10.0
-%global bootstrap_date 2016-07-05
-
-# Use "rebuild" when building with a distro rustc of the same version.
-# Turn this off when the distro has the prior release, matching bootstrap.
-# Note, 1.12 will be able to autodetect this via PR34779.
-%bcond_without rebuild
-
-# The script for minidebuginfo copies symbols and *notes* into a "mini"
-# ELF object compressed into the .gnu_debugdata section.  This includes our
-# relatively large .note.rustc metadata, bloating every library.  Eventually
-# that metadata should be stripped beforehand -- see rust #23366 and #26764.
-# Note, 1.12 will move to unallocated data via PR35409, then can be stripped.
-%undefine _include_minidebuginfo
+%global bootstrap_channel 1.11.0
+%global bootstrap_date 2016-08-16
 
 Name:           rust
-Version:        1.11.0
-Release:        3%{?dist}
+Version:        1.12.0
+Release:        1%{?dist}
 Summary:        The Rust Programming Language
 License:        (ASL 2.0 or MIT) and (BSD and ISC and MIT)
 # ^ written as: (rust itself) and (bundled libraries)
@@ -52,10 +40,8 @@ ExclusiveArch:  x86_64 i686 armv7hl
 %global rust_triple %{_target_cpu}-unknown-linux-gnu
 %endif
 
-Patch1:         rust-1.11.0-no-bootstrap-download.patch
-
 # merged for 1.13.0
-Patch2:         rust-pr35814-armv7-no-neon.patch
+Patch1:         rust-pr35814-armv7-no-neon.patch
 
 BuildRequires:  make
 BuildRequires:  cmake
@@ -67,32 +53,16 @@ BuildRequires:  python2
 BuildRequires:  curl
 
 %if %without bootstrap
-%if %with rebuild
 BuildRequires:  %{name} < %{version}-%{release}
-BuildRequires:  %{name} >= %{version}
-%else
-BuildRequires:  %{name} < %{version}
 BuildRequires:  %{name} >= %{bootstrap_channel}
-%endif
-%endif
-
-# make check: src/test/run-pass/wait-forked-but-failed-child.rs
-BuildRequires:  /usr/bin/ps
-
-# Rust started using cmake for its bundled compiler-rt, but this requires
-# llvm-static to be installed.  But then llvm-config starts printing flags
-# for static linkage, with no way to force it shared.
-#
-# For now, we'll bypass all that and just use the distro build.  Then in the
-# next release, Rust is moving toward a true fork of these builtins, with the
-# eventual goal of rewriting them in Rust proper.
-BuildRequires:  compiler-rt
-Provides:       bundled(compiler-rt) = 3.8
-%ifarch armv7hl
-%global clang_builtins %{_libdir}/clang/3.8.0/lib/libclang_rt.builtins-armhf.a
+%global local_rust_root %{_prefix}
 %else
-%global clang_builtins %{_libdir}/clang/3.8.0/lib/libclang_rt.builtins-%{_target_cpu}.a
+%global bootstrap_root rustc-%{bootstrap_channel}-%{rust_triple}
+%global local_rust_root %{_builddir}/%{rustc_package}/%{bootstrap_root}/rustc
 %endif
+
+# make check needs "ps" for src/test/run-pass/wait-forked-but-failed-child.rs
+BuildRequires:  procps-ng
 
 # TODO: work on unbundling these!
 Provides:       bundled(hoedown) = 3.0.5
@@ -147,12 +117,16 @@ its standard library.
 %prep
 %setup -q -n %{rustc_package}
 
-%patch1 -p1 -b .no-download
-%patch2 -p1 -b .no-neon
+%if %with bootstrap
+find %{sources} -name '%{bootstrap_root}.tar.gz' -exec tar -xvzf '{}' ';'
+test -f '%{local_rust_root}/bin/rustc'
+%endif
+
+%patch1 -p1 -b .no-neon
 
 # unbundle
-rm -rf src/llvm/ src/jemalloc/
-rm -rf src/compiler-rt/
+rm -rf src/jemalloc/
+rm -rf src/llvm/
 
 # extract bundled licenses for packaging
 cp src/rt/hoedown/LICENSE src/rt/hoedown/LICENSE-hoedown
@@ -179,24 +153,16 @@ sed -i.nomips -e '/target=mips/,+1s/^/# unsupported /' \
 sed -i.libdir -e '/^HLIB_RELATIVE/s/lib$/$$(CFG_LIBDIR_RELATIVE)/' mk/main.mk
 %endif
 
-%if %with bootstrap
-mkdir -p dl/
-cp -t dl/ %{?SOURCE1} %{?SOURCE2} %{?SOURCE3} %{?SOURCE4}
-%endif
-
 
 %build
 %configure --disable-option-checking \
   --build=%{rust_triple} --host=%{rust_triple} --target=%{rust_triple} \
-  %{!?with_bootstrap:--enable-local-rust --local-rust-root=%{_prefix} %{?with_rebuild:--enable-local-rebuild}} \
+  --enable-local-rust --local-rust-root=%{local_rust_root} \
   --llvm-root=%{_prefix} --disable-codegen-tests \
   --disable-jemalloc \
   --disable-rpath \
   --enable-debuginfo \
   --release-channel=%{channel}
-
-# Bypass the compiler-rt build -- see above.
-cp %{clang_builtins} ./%{rust_triple}/rt/libcompiler-rt.a
 
 %make_build VERBOSE=1
 
@@ -213,6 +179,10 @@ find %{buildroot}/%{_libdir}/rustlib/ -type f -name '*.so' -exec rm -v '{}' '+'
 # The remaining shared libraries should be executable for debuginfo extraction.
 find %{buildroot}/%{_libdir}/ -type f -name '*.so' -exec chmod -v +x '{}' '+'
 
+# They also don't need the .rustc metadata anymore, so they won't support linking.
+# (but direct section removal breaks dynamic symbols -- leave it for now...)
+#find %{buildroot}/%{_libdir}/ -type f -name '*.so' -exec objcopy -R .rustc '{}' ';'
+
 # FIXME: __os_install_post will strip the rlibs
 # -- should we find a way to preserve debuginfo?
 
@@ -224,7 +194,7 @@ rm -f %{buildroot}/%{_docdir}/%{name}/LICENSE-MIT
 
 # Sanitize the HTML documentation
 find %{buildroot}/%{_docdir}/%{name}/html -empty -delete
-find %{buildroot}/%{_docdir}/%{name}/html -type f -exec chmod -v -x '{}' '+'
+find %{buildroot}/%{_docdir}/%{name}/html -type f -exec chmod -x '{}' '+'
 
 # Move rust-gdb's python scripts so they're noarch
 mkdir -p %{buildroot}/%{_datadir}/%{name}
@@ -273,6 +243,13 @@ make check-lite VERBOSE=1 -k || echo "make check-lite exited with code $?"
 
 
 %changelog
+* Fri Sep 30 2016 Josh Stone <jistone@redhat.com> - 1.12.0-1
+- Update to 1.12.0.
+- Always use --local-rust-root, even for bootstrap binaries.
+- Remove the rebuild conditional - the build system now figures it out.
+- Let minidebuginfo do its thing, since metadata is no longer a note.
+- Let rust build its own compiler-rt builtins again.
+
 * Sat Sep 03 2016 Josh Stone <jistone@redhat.com> - 1.11.0-3
 - Rebuild without bootstrap binaries.
 
