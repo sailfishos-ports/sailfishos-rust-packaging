@@ -8,9 +8,22 @@
 %global bootstrap_channel 1.11.0
 %global bootstrap_date 2016-08-16
 
+# Rust metadata used to be an allocated note (.note.rustc) and minidebuginfo
+# caused an undesirable duplication, leaving the note AND putting it into
+# .gnu_debugdata, so we disabled minidebuginfo.
+#
+# Rust 1.12 metadata is now unallocated data (.rustc), and in theory it should
+# be fine to strip this entirely, since we don't want to expose Rust's unstable
+# ABI for linking.  However, while this works manually for me, when paired with
+# rpm stripping it makes the libraries fail to find their own dynamic symbols.
+# So for now, we'll leave .rustc alone and only let rpm-build strip debuginfo.
+# (This probably deserves a bug report against rpm-build/binutils/elfutils...)
+%global _find_debuginfo_opts -g
+%undefine _include_minidebuginfo
+
 Name:           rust
 Version:        1.12.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        The Rust Programming Language
 License:        (ASL 2.0 or MIT) and (BSD and ISC and MIT)
 # ^ written as: (rust itself) and (bundled libraries)
@@ -243,6 +256,9 @@ make check-lite VERBOSE=1 -k || echo "make check-lite exited with code $?"
 
 
 %changelog
+* Sat Oct 01 2016 Josh Stone <jistone@redhat.com> - 1.12.0-2
+- Protect .rustc from rpm stripping.
+
 * Fri Sep 30 2016 Josh Stone <jistone@redhat.com> - 1.12.0-1
 - Update to 1.12.0.
 - Always use --local-rust-root, even for bootstrap binaries.
