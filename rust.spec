@@ -66,7 +66,7 @@ BuildRequires:  python2
 BuildRequires:  curl
 
 %if %without bootstrap
-BuildRequires:  %{name} < %{version}-%{release}
+BuildRequires:  %{name} <= %{version}
 BuildRequires:  %{name} >= %{bootstrap_channel}
 %global local_rust_root %{_prefix}
 %else
