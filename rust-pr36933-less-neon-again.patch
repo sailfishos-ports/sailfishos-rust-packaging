@@ -1,0 +1,30 @@
+commit 1a4192804518199623fb88bf43bde69d6b0203cb (from a5dac7a2af3ee444817eb7bfbba3539be8c06cf1)
+Merge: a5dac7a2af3e 4625642211b9
+Author: bors <bors@rust-lang.org>
+Date:   Tue Oct 4 13:23:09 2016 -0700
+
+    Auto merge of #36933 - alexcrichton:less-neon-again, r=eddyb
+    
+    rustc: Try again to disable NEON on armv7 linux
+    
+    This is a follow-up to #35814 which apparently didn't disable it hard enough. It
+    looks like LLVM's default armv7 target enables NEON so we'd otherwise have to
+    pass `-neon`, but we're already enabling armv7 with `+v7` supposedly, so let's
+    try just telling LLVM that the armv7 target is arm and then enable features
+    selectively.
+    
+    Closes #36913
+
+diff --git a/src/librustc_back/target/armv7_unknown_linux_gnueabihf.rs b/src/librustc_back/target/armv7_unknown_linux_gnueabihf.rs
+index 1abf8b0b69a2..a6d73ddb1835 100644
+--- a/src/librustc_back/target/armv7_unknown_linux_gnueabihf.rs
++++ b/src/librustc_back/target/armv7_unknown_linux_gnueabihf.rs
+@@ -24,7 +24,7 @@ pub fn target() -> TargetResult {
+ 
+         options: TargetOptions {
+             // Info about features at https://wiki.debian.org/ArmHardFloatPort
+-            features: "+v7,+vfp3,+d16,+thumb2".to_string(),
++            features: "+v7,+vfp3,+d16,+thumb2,-neon".to_string(),
+             cpu: "generic".to_string(),
+             max_atomic_width: 64,
+             .. base

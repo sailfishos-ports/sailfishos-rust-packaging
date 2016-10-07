@@ -4,7 +4,7 @@
 # To bootstrap from scratch, set the channel and date from src/stage0.txt
 # e.g. 1.10.0 wants rustc: 1.9.0-2016-05-24
 # or nightly wants some beta-YYYY-MM-DD
-%bcond_with bootstrap
+%bcond_without bootstrap
 %global bootstrap_channel 1.11.0
 %global bootstrap_date 2016-08-16
 
@@ -23,7 +23,7 @@
 
 Name:           rust
 Version:        1.12.0
-Release:        2%{?dist}
+Release:        3%{?dist}
 Summary:        The Rust Programming Language
 License:        (ASL 2.0 or MIT) and (BSD and ISC and MIT)
 # ^ written as: (rust itself) and (bundled libraries)
@@ -41,12 +41,12 @@ Source0:        https://static.rust-lang.org/dist/%{rustc_package}-src.tar.gz
 Source1:        %{bootstrap_base}-x86_64-unknown-linux-gnu.tar.gz
 Source2:        %{bootstrap_base}-i686-unknown-linux-gnu.tar.gz
 Source3:        %{bootstrap_base}-armv7-unknown-linux-gnueabihf.tar.gz
-#Source4:        %{bootstrap_base}-aarch64-unknown-linux-gnu.tar.gz
+Source4:        %{bootstrap_base}-aarch64-unknown-linux-gnu.tar.gz
 %endif
 
 # Only x86_64 and i686 are Tier 1 platforms at this time.
 # https://doc.rust-lang.org/stable/book/getting-started.html#tier-1
-ExclusiveArch:  x86_64 i686 armv7hl
+ExclusiveArch:  x86_64 i686 armv7hl aarch64
 %ifarch armv7hl
 %global rust_triple armv7-unknown-linux-gnueabihf
 %else
@@ -55,6 +55,9 @@ ExclusiveArch:  x86_64 i686 armv7hl
 
 # merged for 1.13.0
 Patch1:         rust-pr35814-armv7-no-neon.patch
+
+# merged for 1.14.0
+Patch2:         rust-pr36933-less-neon-again.patch
 
 BuildRequires:  make
 BuildRequires:  cmake
@@ -136,6 +139,7 @@ test -f '%{local_rust_root}/bin/rustc'
 %endif
 
 %patch1 -p1 -b .no-neon
+%patch2 -p1 -b .less-neon
 
 # unbundle
 rm -rf src/jemalloc/
@@ -168,6 +172,15 @@ sed -i.libdir -e '/^HLIB_RELATIVE/s/lib$/$$(CFG_LIBDIR_RELATIVE)/' mk/main.mk
 
 
 %build
+
+%ifarch aarch64
+%if %with bootstrap
+# Upstream binaries have a 4k-paged jemalloc, which breaks with Fedora 64k pages.
+# https://github.com/rust-lang/rust/issues/36994
+export MALLOC_CONF=lg_dirty_mult:-1
+%endif
+%endif
+
 %configure --disable-option-checking \
   --build=%{rust_triple} --host=%{rust_triple} --target=%{rust_triple} \
   --enable-local-rust --local-rust-root=%{local_rust_root} \
@@ -256,6 +269,11 @@ make check-lite VERBOSE=1 -k || echo "make check-lite exited with code $?"
 
 
 %changelog
+* Thu Oct 06 2016 Josh Stone <jistone@redhat.com> - 1.12.0-3
+- Bootstrap aarch64.
+- Use jemalloc's MALLOC_CONF to work around #36944.
+- Apply pr36933 to really disable armv7hl NEON.
+
 * Sat Oct 01 2016 Josh Stone <jistone@redhat.com> - 1.12.0-2
 - Protect .rustc from rpm stripping.
 
