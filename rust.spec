@@ -8,22 +8,19 @@
 %global bootstrap_channel 1.11.0
 %global bootstrap_date 2016-08-16
 
-# Rust metadata used to be an allocated note (.note.rustc) and minidebuginfo
-# caused an undesirable duplication, leaving the note AND putting it into
-# .gnu_debugdata, so we disabled minidebuginfo.
-#
 # Rust 1.12 metadata is now unallocated data (.rustc), and in theory it should
 # be fine to strip this entirely, since we don't want to expose Rust's unstable
-# ABI for linking.  However, while this works manually for me, when paired with
-# rpm stripping it makes the libraries fail to find their own dynamic symbols.
-# So for now, we'll leave .rustc alone and only let rpm-build strip debuginfo.
-# (This probably deserves a bug report against rpm-build/binutils/elfutils...)
+# ABI for linking.  However, eu-strip was then clobbering .dynsym when it tried
+# to remove the rust_metadata symbol referencing .rustc (rhbz1380961).
+# So for unfixed elfutils, we'll leave .rustc alone and only strip debuginfo.
+%if 0%{?fedora} < 26
 %global _find_debuginfo_opts -g
 %undefine _include_minidebuginfo
+%endif
 
 Name:           rust
 Version:        1.12.0
-Release:        4%{?dist}
+Release:        5%{?dist}
 Summary:        The Rust Programming Language
 License:        (ASL 2.0 or MIT) and (BSD and ISC and MIT)
 # ^ written as: (rust itself) and (bundled libraries)
@@ -206,8 +203,10 @@ find %{buildroot}/%{_libdir}/rustlib/ -type f -name '*.so' -exec rm -v '{}' '+'
 find %{buildroot}/%{_libdir}/ -type f -name '*.so' -exec chmod -v +x '{}' '+'
 
 # They also don't need the .rustc metadata anymore, so they won't support linking.
-# (but direct section removal breaks dynamic symbols -- leave it for now...)
-#find %{buildroot}/%{_libdir}/ -type f -name '*.so' -exec objcopy -R .rustc '{}' ';'
+# (but this needs the rhbz1380961 fix, or else eu-strip will clobber .dynsym)
+%if 0%{?fedora} >= 26
+find %{buildroot}/%{_libdir}/ -type f -name '*.so' -exec objcopy -R .rustc '{}' ';'
+%endif
 
 # FIXME: __os_install_post will strip the rlibs
 # -- should we find a way to preserve debuginfo?
@@ -269,6 +268,9 @@ make check-lite VERBOSE=1 -k || echo "make check-lite exited with code $?"
 
 
 %changelog
+* Fri Oct 07 2016 Josh Stone <jistone@redhat.com> - 1.12.0-5
+- Rebuild with fixed eu-strip (rhbz1380961)
+
 * Fri Oct 07 2016 Josh Stone <jistone@redhat.com> - 1.12.0-4
 - Rebuild without bootstrap binaries.
 
