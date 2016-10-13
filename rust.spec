@@ -230,7 +230,7 @@ mv -v %{buildroot}/%{_libdir}/rustlib/etc %{buildroot}/%{_datadir}/%{name}/
 # Note, many of the tests execute in parallel threads,
 # so it's better not to use a parallel make here.
 # The results are not stable on koji, so mask errors and just log it.
-make check-lite VERBOSE=1 -k || echo "make check-lite exited with code $?"
+make check-lite VERBOSE=1 -k || python2 src/etc/check-summary.py tmp/*.log || :
 
 
 %post -p /sbin/ldconfig
