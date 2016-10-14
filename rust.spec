@@ -20,7 +20,7 @@
 
 Name:           rust
 Version:        1.12.0
-Release:        5%{?dist}
+Release:        6%{?dist}
 Summary:        The Rust Programming Language
 License:        (ASL 2.0 or MIT) and (BSD and ISC and MIT)
 # ^ written as: (rust itself) and (bundled libraries)
@@ -60,7 +60,7 @@ BuildRequires:  make
 BuildRequires:  cmake
 BuildRequires:  gcc
 BuildRequires:  gcc-c++
-BuildRequires:  llvm-devel
+BuildRequires:  llvm-devel llvm-static
 BuildRequires:  zlib-devel
 BuildRequires:  python2
 BuildRequires:  curl
@@ -268,6 +268,9 @@ make check-lite VERBOSE=1 -k || python2 src/etc/check-summary.py tmp/*.log || :
 
 
 %changelog
+* Thu Oct 13 2016 Josh Stone <jistone@redhat.com> - 1.12.0-6
+- Rebuild with llvm-static, preparing for 3.9
+
 * Fri Oct 07 2016 Josh Stone <jistone@redhat.com> - 1.12.0-5
 - Rebuild with fixed eu-strip (rhbz1380961)
 
