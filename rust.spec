@@ -8,6 +8,11 @@
 %global bootstrap_channel 1.11.0
 %global bootstrap_date 2016-08-16
 
+# We generally don't want llvm-static present at all, since llvm-config will
+# make us link statically.  But we can opt in, e.g. to aid LLVM rebases.
+%bcond_without llvm_static
+
+
 # Rust 1.12 metadata is now unallocated data (.rustc), and in theory it should
 # be fine to strip this entirely, since we don't want to expose Rust's unstable
 # ABI for linking.  However, eu-strip was then clobbering .dynsym when it tried
@@ -60,10 +65,19 @@ BuildRequires:  make
 BuildRequires:  cmake
 BuildRequires:  gcc
 BuildRequires:  gcc-c++
-BuildRequires:  llvm-devel llvm-static
+BuildRequires:  llvm-devel
 BuildRequires:  zlib-devel
 BuildRequires:  python2
 BuildRequires:  curl
+
+%if %with llvm_static
+BuildRequires:  llvm-static
+BuildRequires:  libffi-devel
+%else
+# Make sure llvm-config doesn't see it.
+BuildConflicts: llvm-static
+%endif
+
 
 %if %without bootstrap
 BuildRequires:  %{name} <= %{version}
@@ -165,6 +179,13 @@ sed -i.nomips -e '/target=mips/,+1s/^/# unsupported /' \
 %if %without bootstrap
 # The hardcoded stage0 "lib" is inappropriate when using Fedora's own rustc
 sed -i.libdir -e '/^HLIB_RELATIVE/s/lib$/$$(CFG_LIBDIR_RELATIVE)/' mk/main.mk
+%endif
+
+%if %with llvm_static
+# Static linking to distro LLVM needs to add -lffi
+# https://github.com/rust-lang/rust/issues/34486
+sed -i.ffi -e '$a #[link(name = "ffi")] extern {}' \
+  src/librustc_llvm/lib.rs
 %endif
 
 
