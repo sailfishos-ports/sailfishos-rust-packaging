@@ -10,7 +10,7 @@
 
 # We generally don't want llvm-static present at all, since llvm-config will
 # make us link statically.  But we can opt in, e.g. to aid LLVM rebases.
-%bcond_without llvm_static
+%bcond_with llvm_static
 
 
 # Rust 1.12 metadata is now unallocated data (.rustc), and in theory it should
@@ -25,7 +25,7 @@
 
 Name:           rust
 Version:        1.12.0
-Release:        6%{?dist}
+Release:        7%{?dist}
 Summary:        The Rust Programming Language
 License:        (ASL 2.0 or MIT) and (BSD and ISC and MIT)
 # ^ written as: (rust itself) and (bundled libraries)
@@ -289,6 +289,9 @@ make check-lite VERBOSE=1 -k || python2 src/etc/check-summary.py tmp/*.log || :
 
 
 %changelog
+* Fri Oct 14 2016 Josh Stone <jistone@redhat.com> - 1.12.0-7
+- Rebuild with LLVM 3.9.
+
 * Thu Oct 13 2016 Josh Stone <jistone@redhat.com> - 1.12.0-6
 - Rebuild with llvm-static, preparing for 3.9
 
