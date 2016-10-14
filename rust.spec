@@ -66,6 +66,7 @@ BuildRequires:  cmake
 BuildRequires:  gcc
 BuildRequires:  gcc-c++
 BuildRequires:  llvm-devel
+BuildRequires:  ncurses-devel
 BuildRequires:  zlib-devel
 BuildRequires:  python2
 BuildRequires:  curl
@@ -291,6 +292,7 @@ make check-lite VERBOSE=1 -k || python2 src/etc/check-summary.py tmp/*.log || :
 %changelog
 * Fri Oct 14 2016 Josh Stone <jistone@redhat.com> - 1.12.0-7
 - Rebuild with LLVM 3.9.
+- Add ncurses-devel for llvm-config's -ltinfo.
 
 * Thu Oct 13 2016 Josh Stone <jistone@redhat.com> - 1.12.0-6
 - Rebuild with llvm-static, preparing for 3.9
