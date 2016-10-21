@@ -18,14 +18,14 @@
 # ABI for linking.  However, eu-strip was then clobbering .dynsym when it tried
 # to remove the rust_metadata symbol referencing .rustc (rhbz1380961).
 # So for unfixed elfutils, we'll leave .rustc alone and only strip debuginfo.
-%if 0%{?fedora} < 26
+%if 0%{?fedora} < 25
 %global _find_debuginfo_opts -g
 %undefine _include_minidebuginfo
 %endif
 
 Name:           rust
-Version:        1.12.0
-Release:        7%{?dist}
+Version:        1.12.1
+Release:        1%{?dist}
 Summary:        The Rust Programming Language
 License:        (ASL 2.0 or MIT) and (BSD and ISC and MIT)
 # ^ written as: (rust itself) and (bundled libraries)
@@ -60,6 +60,11 @@ Patch1:         rust-pr35814-armv7-no-neon.patch
 
 # merged for 1.14.0
 Patch2:         rust-pr36933-less-neon-again.patch
+
+# temporary measure for building 1.12.1 from 1.12.0
+# https://users.rust-lang.org/t/bootstrapping-1-12-1-from-1-12-0/7715
+# https://gist.github.com/brson/ff61fef70ac30ed4a33672e2b230e7e1
+Patch3:         rust-boot-1.12.1-from-1.12.0.diff
 
 BuildRequires:  make
 BuildRequires:  cmake
@@ -152,6 +157,7 @@ test -f '%{local_rust_root}/bin/rustc'
 
 %patch1 -p1 -b .no-neon
 %patch2 -p1 -b .less-neon
+%patch3 -p1 -b .bootstrap
 
 # unbundle
 rm -rf src/jemalloc/
@@ -226,7 +232,7 @@ find %{buildroot}/%{_libdir}/ -type f -name '*.so' -exec chmod -v +x '{}' '+'
 
 # They also don't need the .rustc metadata anymore, so they won't support linking.
 # (but this needs the rhbz1380961 fix, or else eu-strip will clobber .dynsym)
-%if 0%{?fedora} >= 26
+%if 0%{?fedora} >= 25
 find %{buildroot}/%{_libdir}/ -type f -name '*.so' -exec objcopy -R .rustc '{}' ';'
 %endif
 
@@ -290,6 +296,9 @@ make check-lite VERBOSE=1 -k || python2 src/etc/check-summary.py tmp/*.log || :
 
 
 %changelog
+* Thu Oct 20 2016 Josh Stone <jistone@redhat.com> - 1.12.1-1
+- Update to 1.12.1.
+
 * Fri Oct 14 2016 Josh Stone <jistone@redhat.com> - 1.12.0-7
 - Rebuild with LLVM 3.9.
 - Add ncurses-devel for llvm-config's -ltinfo.
