@@ -61,11 +61,6 @@ Patch1:         rust-pr35814-armv7-no-neon.patch
 # merged for 1.14.0
 Patch2:         rust-pr36933-less-neon-again.patch
 
-# temporary measure for building 1.12.1 from 1.12.0
-# https://users.rust-lang.org/t/bootstrapping-1-12-1-from-1-12-0/7715
-# https://gist.github.com/brson/ff61fef70ac30ed4a33672e2b230e7e1
-Patch3:         rust-boot-1.12.1-from-1.12.0.diff
-
 BuildRequires:  make
 BuildRequires:  cmake
 BuildRequires:  gcc
@@ -157,7 +152,6 @@ test -f '%{local_rust_root}/bin/rustc'
 
 %patch1 -p1 -b .no-neon
 %patch2 -p1 -b .less-neon
-%patch3 -p1 -b .bootstrap
 
 # unbundle
 rm -rf src/jemalloc/
