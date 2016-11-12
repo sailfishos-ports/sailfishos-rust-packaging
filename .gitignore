@@ -11,3 +11,8 @@
 /rustc-1.11.0-x86_64-unknown-linux-gnu.tar.gz
 /rustc-1.12.0-src.tar.gz
 /rustc-1.12.1-src.tar.gz
+/rustc-1.13.0-src.tar.gz
+/rustc-1.12.1-aarch64-unknown-linux-gnu.tar.gz
+/rustc-1.12.1-armv7-unknown-linux-gnueabihf.tar.gz
+/rustc-1.12.1-i686-unknown-linux-gnu.tar.gz
+/rustc-1.12.1-x86_64-unknown-linux-gnu.tar.gz

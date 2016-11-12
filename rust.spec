@@ -5,11 +5,14 @@
 # e.g. 1.10.0 wants rustc: 1.9.0-2016-05-24
 # or nightly wants some beta-YYYY-MM-DD
 %bcond_with bootstrap
-%global bootstrap_channel 1.11.0
-%global bootstrap_date 2016-08-16
+%global bootstrap_channel 1.12.1
+%global bootstrap_date 2016-10-20
 
 # We generally don't want llvm-static present at all, since llvm-config will
 # make us link statically.  But we can opt in, e.g. to aid LLVM rebases.
+# FIXME: LLVM 3.9 prefers shared linking now! Which is good, but next time we
+# *want* static we'll have to force it with "llvm-config --link-static".
+# See also https://github.com/rust-lang/rust/issues/36854
 %bcond_with llvm_static
 
 
@@ -24,7 +27,7 @@
 %endif
 
 Name:           rust
-Version:        1.12.1
+Version:        1.13.0
 Release:        1%{?dist}
 Summary:        The Rust Programming Language
 License:        (ASL 2.0 or MIT) and (BSD and ISC and MIT)
@@ -55,11 +58,14 @@ ExclusiveArch:  x86_64 i686 armv7hl aarch64
 %global rust_triple %{_target_cpu}-unknown-linux-gnu
 %endif
 
-# merged for 1.13.0
-Patch1:         rust-pr35814-armv7-no-neon.patch
+# We're going to override --libdir when configuring to get rustlib into a
+# common path, but we'll properly relocate the shared libraries during install.
+%global common_libdir %{_prefix}/lib
+%global rustlibdir %{common_libdir}/rustlib
 
 # merged for 1.14.0
-Patch2:         rust-pr36933-less-neon-again.patch
+Patch1:         rust-pr36933-less-neon-again.patch
+Patch2:         rust-compiler-rt-pr26-arm-cc.patch
 
 BuildRequires:  make
 BuildRequires:  cmake
@@ -98,6 +104,13 @@ Provides:       bundled(jquery) = 2.1.4
 Provides:       bundled(libbacktrace) = 6.1.0
 Provides:       bundled(miniz) = 1.14
 
+# Virtual provides for folks who attempt "dnf install rustc"
+Provides:       rustc = %{version}-%{release}
+Provides:       rustc%{?_isa} = %{version}-%{release}
+
+# Always require our exact standard library
+Requires:       %{name}-std-static%{?_isa} = %{version}-%{release}
+
 # The C compiler is needed at runtime just for linking.  Someday rustc might
 # invoke the linker directly, and then we'll only need binutils.
 # https://github.com/rust-lang/rust/issues/11937
@@ -112,8 +125,15 @@ Requires:       gcc
 Rust is a systems programming language that runs blazingly fast, prevents
 segfaults, and guarantees thread safety.
 
-This package includes the Rust compiler, standard library, and documentation
-generator.
+This package includes the Rust compiler and documentation generator.
+
+
+%package std-static
+Summary:        Standard library for Rust
+
+%description std-static
+This package includes the standard libraries for building applications
+written in Rust.
 
 
 %package gdb
@@ -138,10 +158,6 @@ This package includes HTML documentation for the Rust programming language and
 its standard library.
 
 
-# TODO: consider a rust-std package containing .../rustlib/$target
-# This might allow multilib cross-compilation to work naturally.
-
-
 %prep
 %setup -q -n %{rustc_package}
 
@@ -150,8 +166,8 @@ find %{sources} -name '%{bootstrap_root}.tar.gz' -exec tar -xvzf '{}' ';'
 test -f '%{local_rust_root}/bin/rustc'
 %endif
 
-%patch1 -p1 -b .no-neon
-%patch2 -p1 -b .less-neon
+%patch1 -p1 -b .less-neon
+%patch2 -p1 -d src/compiler-rt -b .arm-cc
 
 # unbundle
 rm -rf src/jemalloc/
@@ -162,24 +178,18 @@ cp src/rt/hoedown/LICENSE src/rt/hoedown/LICENSE-hoedown
 sed -e '/*\//q' src/libbacktrace/backtrace.h \
   >src/libbacktrace/LICENSE-libbacktrace
 
-# rust-gdb has hardcoded SYSROOT/lib -- let's make it noarch
-sed -i.noarch -e 's#DIRECTORY=".*"#DIRECTORY="%{_datadir}/%{name}/etc"#' \
-  src/etc/rust-gdb
-
 # These tests assume that alloc_jemalloc is present
 sed -i.jemalloc -e '1i // ignore-test jemalloc is disabled' \
   src/test/compile-fail/allocator-dylib-is-system.rs \
   src/test/compile-fail/allocator-rust-dylib-is-jemalloc.rs \
   src/test/run-pass/allocator-default.rs
 
-# Fedora's LLVM doesn't support any mips targets -- see "llc -version".
-# Fixed properly by Rust PR36344, which should be released in 1.13.
-sed -i.nomips -e '/target=mips/,+1s/^/# unsupported /' \
-  src/test/run-make/atomic-lock-free/Makefile
-
 %if %without bootstrap
 # The hardcoded stage0 "lib" is inappropriate when using Fedora's own rustc
-sed -i.libdir -e '/^HLIB_RELATIVE/s/lib$/$$(CFG_LIBDIR_RELATIVE)/' mk/main.mk
+# ... Or it was, but now we're transitioning to a common /usr/lib/rustlib/
+if [ '%{_lib}' != lib -a -d '%{_libdir}/rustlib/%{rust_triple}' ]; then
+  sed -i.libdir -e '/^HLIB_RELATIVE/s/lib$/%{_lib}/' mk/main.mk
+fi
 %endif
 
 %if %with llvm_static
@@ -192,15 +202,24 @@ sed -i.ffi -e '$a #[link(name = "ffi")] extern {}' \
 
 %build
 
-%ifarch aarch64
+%ifarch aarch64 %{mips} %{power64}
 %if %with bootstrap
 # Upstream binaries have a 4k-paged jemalloc, which breaks with Fedora 64k pages.
-# https://github.com/rust-lang/rust/issues/36994
+# See https://github.com/rust-lang/rust/issues/36994
+# Fixed by https://github.com/rust-lang/rust/issues/37392
+# So we can remove this when bootstrap reaches Rust 1.14.0.
 export MALLOC_CONF=lg_dirty_mult:-1
 %endif
 %endif
 
+# Use hardening ldflags.
+export RUSTFLAGS="-Clink-args=-Wl,-z,relro,-z,now"
+
+# Note, libdir is overridden so we'll have a common rustlib path,
+# but shared libs will be fixed during install.
+
 %configure --disable-option-checking \
+  --libdir=%{common_libdir} \
   --build=%{rust_triple} --host=%{rust_triple} --target=%{rust_triple} \
   --enable-local-rust --local-rust-root=%{local_rust_root} \
   --llvm-root=%{_prefix} --disable-codegen-tests \
@@ -215,11 +234,18 @@ export MALLOC_CONF=lg_dirty_mult:-1
 %install
 %make_install VERBOSE=1
 
+%if "%{common_libdir}" != "%{_libdir}"
+# Fix the installed location of shared libraries.
+# (should perhaps use a subdir and ld.so.conf script?)
+mkdir -p %{buildroot}/%{_libdir}
+mv -v -t %{buildroot}/%{_libdir} %{buildroot}/%{common_libdir}/*.so
+%endif
+
 # Remove installer artifacts (manifests, uninstall scripts, etc.)
-find %{buildroot}/%{_libdir}/rustlib/ -maxdepth 1 -type f -exec rm -v '{}' '+'
+find %{buildroot}/%{rustlibdir} -maxdepth 1 -type f -exec rm -v '{}' '+'
 
 # We don't want to ship the target shared libraries for lack of any Rust ABI.
-find %{buildroot}/%{_libdir}/rustlib/ -type f -name '*.so' -exec rm -v '{}' '+'
+find %{buildroot}/%{rustlibdir} -type f -name '*.so' -exec rm -v '{}' '+'
 
 # The remaining shared libraries should be executable for debuginfo extraction.
 find %{buildroot}/%{_libdir}/ -type f -name '*.so' -exec chmod -v +x '{}' '+'
@@ -243,10 +269,6 @@ rm -f %{buildroot}/%{_docdir}/%{name}/LICENSE-MIT
 find %{buildroot}/%{_docdir}/%{name}/html -empty -delete
 find %{buildroot}/%{_docdir}/%{name}/html -type f -exec chmod -x '{}' '+'
 
-# Move rust-gdb's python scripts so they're noarch
-mkdir -p %{buildroot}/%{_datadir}/%{name}
-mv -v %{buildroot}/%{_libdir}/rustlib/etc %{buildroot}/%{_datadir}/%{name}/
-
 
 %check
 # Note, many of the tests execute in parallel threads,
@@ -269,13 +291,20 @@ make check-lite VERBOSE=1 -k || python2 src/etc/check-summary.py tmp/*.log || :
 %{_mandir}/man1/rustc.1*
 %{_mandir}/man1/rustdoc.1*
 %{_libdir}/lib*
-%dir %{_libdir}/rustlib
-%{_libdir}/rustlib/%{rust_triple}
+
+
+%files std-static
+%dir %{rustlibdir}
+%dir %{rustlibdir}/%{rust_triple}
+%dir %{rustlibdir}/%{rust_triple}/lib
+%{rustlibdir}/%{rust_triple}/lib/*.rlib
 
 
 %files gdb
 %{_bindir}/rust-gdb
-%{_datadir}/%{name}
+%dir %{rustlibdir}
+%dir %{rustlibdir}/etc
+%{rustlibdir}/etc/*.py*
 
 
 %files doc
@@ -290,6 +319,12 @@ make check-lite VERBOSE=1 -k || python2 src/etc/check-summary.py tmp/*.log || :
 
 
 %changelog
+* Thu Nov 10 2016 Josh Stone <jistone@redhat.com> - 1.13.0-1
+- Update to 1.13.0.
+- Use hardening flags for linking.
+- Split the standard library into its own package
+- Centralize rustlib/ under /usr/lib/ for multilib integration.
+
 * Thu Oct 20 2016 Josh Stone <jistone@redhat.com> - 1.12.1-1
 - Update to 1.12.1.
 
