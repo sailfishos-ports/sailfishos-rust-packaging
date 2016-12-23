@@ -13,7 +13,6 @@
 
 # Only the specified arches will use bootstrap binaries.
 #global bootstrap_arches %%{rust_arches}
-%global bootstrap_arches ppc64 ppc64le s390x
 
 # We generally don't want llvm-static present at all, since llvm-config will
 # make us link statically.  But we can opt in, e.g. to aid LLVM rebases.
@@ -25,7 +24,7 @@
 
 Name:           rust
 Version:        1.14.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        The Rust Programming Language
 License:        (ASL 2.0 or MIT) and (BSD and ISC and MIT)
 # ^ written as: (rust itself) and (bundled libraries)
@@ -331,6 +330,9 @@ make check-lite VERBOSE=1 -k || python2 src/etc/check-summary.py tmp/*.log || :
 
 
 %changelog
+* Fri Dec 23 2016 Josh Stone <jistone@redhat.com> - 1.14.0-2
+- Rebuild without bootstrap binaries.
+
 * Thu Dec 22 2016 Josh Stone <jistone@redhat.com> - 1.14.0-1
 - Update to 1.14.0.
 - Rewrite bootstrap logic to target specific arches.
