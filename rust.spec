@@ -1,12 +1,19 @@
+# Only x86_64 and i686 are Tier 1 platforms at this time.
+# https://forge.rust-lang.org/platform-support.html
+%global rust_arches x86_64 i686 armv7hl aarch64 ppc64 ppc64le s390x
+
 # The channel can be stable, beta, or nightly
 %{!?channel: %global channel stable}
 
 # To bootstrap from scratch, set the channel and date from src/stage0.txt
 # e.g. 1.10.0 wants rustc: 1.9.0-2016-05-24
 # or nightly wants some beta-YYYY-MM-DD
-%bcond_with bootstrap
-%global bootstrap_channel 1.12.1
-%global bootstrap_date 2016-10-20
+%global bootstrap_channel 1.13.0
+%global bootstrap_date 2016-11-08
+
+# Only the specified arches will use bootstrap binaries.
+#global bootstrap_arches %%{rust_arches}
+%global bootstrap_arches ppc64 ppc64le s390x
 
 # We generally don't want llvm-static present at all, since llvm-config will
 # make us link statically.  But we can opt in, e.g. to aid LLVM rebases.
@@ -16,23 +23,14 @@
 %bcond_with llvm_static
 
 
-# Rust 1.12 metadata is now unallocated data (.rustc), and in theory it should
-# be fine to strip this entirely, since we don't want to expose Rust's unstable
-# ABI for linking.  However, eu-strip was then clobbering .dynsym when it tried
-# to remove the rust_metadata symbol referencing .rustc (rhbz1380961).
-# So for unfixed elfutils, we'll leave .rustc alone and only strip debuginfo.
-%if 0%{?fedora} < 25
-%global _find_debuginfo_opts -g
-%undefine _include_minidebuginfo
-%endif
-
 Name:           rust
-Version:        1.13.0
+Version:        1.14.0
 Release:        1%{?dist}
 Summary:        The Rust Programming Language
 License:        (ASL 2.0 or MIT) and (BSD and ISC and MIT)
 # ^ written as: (rust itself) and (bundled libraries)
 URL:            https://www.rust-lang.org
+ExclusiveArch:  %{rust_arches}
 
 %if "%{channel}" == "stable"
 %global rustc_package rustc-%{version}
@@ -41,31 +39,52 @@ URL:            https://www.rust-lang.org
 %endif
 Source0:        https://static.rust-lang.org/dist/%{rustc_package}-src.tar.gz
 
-%if %with bootstrap
-%global bootstrap_base https://static.rust-lang.org/dist/%{bootstrap_date}/rustc-%{bootstrap_channel}
-Source1:        %{bootstrap_base}-x86_64-unknown-linux-gnu.tar.gz
-Source2:        %{bootstrap_base}-i686-unknown-linux-gnu.tar.gz
-Source3:        %{bootstrap_base}-armv7-unknown-linux-gnueabihf.tar.gz
-Source4:        %{bootstrap_base}-aarch64-unknown-linux-gnu.tar.gz
+# Get the Rust triple for any arch.
+%{lua: function rust_triple(arch)
+  local abi = "gnu"
+  if arch == "armv7hl" then
+    arch = "armv7"
+    abi = "gnueabihf"
+  elseif arch == "ppc64" then
+    arch = "powerpc64"
+  elseif arch == "ppc64le" then
+    arch = "powerpc64le"
+  end
+  return arch.."-unknown-linux-"..abi
+end}
+
+%global rust_triple %{lua: print(rust_triple(rpm.expand("%{_target_cpu}")))}
+
+%if %defined bootstrap_arches
+# For each bootstrap arch, add an additional binary Source.
+# Also define bootstrap_source just for the current target.
+%{lua: do
+  local bootstrap_arches = {}
+  for arch in string.gmatch(rpm.expand("%{bootstrap_arches}"), "%S+") do
+    table.insert(bootstrap_arches, arch)
+  end
+  local base = rpm.expand("https://static.rust-lang.org/dist/%{bootstrap_date}"
+                          .."/rustc-%{bootstrap_channel}")
+  local target_arch = rpm.expand("%{_target_cpu}")
+  for i, arch in ipairs(bootstrap_arches) do
+    print(string.format("Source%d: %s-%s.tar.gz\n",
+                        i, base, rust_triple(arch)))
+    if arch == target_arch then
+      rpm.define("bootstrap_source "..i)
+    end
+  end
+end}
 %endif
 
-# Only x86_64 and i686 are Tier 1 platforms at this time.
-# https://doc.rust-lang.org/stable/book/getting-started.html#tier-1
-ExclusiveArch:  x86_64 i686 armv7hl aarch64
-%ifarch armv7hl
-%global rust_triple armv7-unknown-linux-gnueabihf
+%ifarch %{bootstrap_arches}
+%global bootstrap_root rustc-%{bootstrap_channel}-%{rust_triple}
+%global local_rust_root %{_builddir}/%{bootstrap_root}/rustc
+Provides:       bundled(%{name}-bootstrap) = %{bootstrap_channel}
 %else
-%global rust_triple %{_target_cpu}-unknown-linux-gnu
+BuildRequires:  %{name} <= %{version}
+BuildRequires:  %{name} >= %{bootstrap_channel}
+%global local_rust_root %{_prefix}
 %endif
-
-# We're going to override --libdir when configuring to get rustlib into a
-# common path, but we'll properly relocate the shared libraries during install.
-%global common_libdir %{_prefix}/lib
-%global rustlibdir %{common_libdir}/rustlib
-
-# merged for 1.14.0
-Patch1:         rust-pr36933-less-neon-again.patch
-Patch2:         rust-compiler-rt-pr26-arm-cc.patch
 
 BuildRequires:  make
 BuildRequires:  cmake
@@ -83,16 +102,6 @@ BuildRequires:  libffi-devel
 %else
 # Make sure llvm-config doesn't see it.
 BuildConflicts: llvm-static
-%endif
-
-
-%if %without bootstrap
-BuildRequires:  %{name} <= %{version}
-BuildRequires:  %{name} >= %{bootstrap_channel}
-%global local_rust_root %{_prefix}
-%else
-%global bootstrap_root rustc-%{bootstrap_channel}-%{rust_triple}
-%global local_rust_root %{_builddir}/%{rustc_package}/%{bootstrap_root}/rustc
 %endif
 
 # make check needs "ps" for src/test/run-pass/wait-forked-but-failed-child.rs
@@ -120,6 +129,16 @@ Requires:       gcc
 %global _privatelibs lib.*-[[:xdigit:]]{8}[.]so.*
 %global __provides_exclude ^(%{_privatelibs})$
 %global __requires_exclude ^(%{_privatelibs})$
+
+# Rust 1.12 metadata is now unallocated data (.rustc), and in theory it should
+# be fine to strip this entirely, since we don't want to expose Rust's unstable
+# ABI for linking.  However, eu-strip was then clobbering .dynsym when it tried
+# to remove the rust_metadata symbol referencing .rustc (rhbz1380961).
+# So for unfixed elfutils, we'll leave .rustc alone and only strip debuginfo.
+%if 0%{?fedora} < 25
+%global _find_debuginfo_opts -g
+%undefine _include_minidebuginfo
+%endif
 
 %description
 Rust is a systems programming language that runs blazingly fast, prevents
@@ -159,15 +178,13 @@ its standard library.
 
 
 %prep
-%setup -q -n %{rustc_package}
 
-%if %with bootstrap
-find %{sources} -name '%{bootstrap_root}.tar.gz' -exec tar -xvzf '{}' ';'
+%ifarch %{bootstrap_arches}
+%setup -q -n %{bootstrap_root} -T -b %{bootstrap_source}
 test -f '%{local_rust_root}/bin/rustc'
 %endif
 
-%patch1 -p1 -b .less-neon
-%patch2 -p1 -d src/compiler-rt -b .arm-cc
+%setup -q -n %{rustc_package}
 
 # unbundle
 rm -rf src/jemalloc/
@@ -179,18 +196,11 @@ sed -e '/*\//q' src/libbacktrace/backtrace.h \
   >src/libbacktrace/LICENSE-libbacktrace
 
 # These tests assume that alloc_jemalloc is present
+# https://github.com/rust-lang/rust/issues/35017
 sed -i.jemalloc -e '1i // ignore-test jemalloc is disabled' \
   src/test/compile-fail/allocator-dylib-is-system.rs \
   src/test/compile-fail/allocator-rust-dylib-is-jemalloc.rs \
   src/test/run-pass/allocator-default.rs
-
-%if %without bootstrap
-# The hardcoded stage0 "lib" is inappropriate when using Fedora's own rustc
-# ... Or it was, but now we're transitioning to a common /usr/lib/rustlib/
-if [ '%{_lib}' != lib -a -d '%{_libdir}/rustlib/%{rust_triple}' ]; then
-  sed -i.libdir -e '/^HLIB_RELATIVE/s/lib$/%{_lib}/' mk/main.mk
-fi
-%endif
 
 %if %with llvm_static
 # Static linking to distro LLVM needs to add -lffi
@@ -203,7 +213,7 @@ sed -i.ffi -e '$a #[link(name = "ffi")] extern {}' \
 %build
 
 %ifarch aarch64 %{mips} %{power64}
-%if %with bootstrap
+%ifarch %{bootstrap_arches}
 # Upstream binaries have a 4k-paged jemalloc, which breaks with Fedora 64k pages.
 # See https://github.com/rust-lang/rust/issues/36994
 # Fixed by https://github.com/rust-lang/rust/issues/37392
@@ -213,10 +223,12 @@ export MALLOC_CONF=lg_dirty_mult:-1
 %endif
 
 # Use hardening ldflags.
-export RUSTFLAGS="-Clink-args=-Wl,-z,relro,-z,now"
+export RUSTFLAGS="-Clink-arg=-Wl,-z,relro,-z,now"
 
-# Note, libdir is overridden so we'll have a common rustlib path,
-# but shared libs will be fixed during install.
+# We're going to override --libdir when configuring to get rustlib into a
+# common path, but we'll properly relocate the shared libraries during install.
+%global common_libdir %{_prefix}/lib
+%global rustlibdir %{common_libdir}/rustlib
 
 %configure --disable-option-checking \
   --libdir=%{common_libdir} \
@@ -319,6 +331,11 @@ make check-lite VERBOSE=1 -k || python2 src/etc/check-summary.py tmp/*.log || :
 
 
 %changelog
+* Thu Dec 22 2016 Josh Stone <jistone@redhat.com> - 1.14.0-1
+- Update to 1.14.0.
+- Rewrite bootstrap logic to target specific arches.
+- Bootstrap ppc64, ppc64le, s390x. (thanks to Sinny Kumari for testing!)
+
 * Thu Nov 10 2016 Josh Stone <jistone@redhat.com> - 1.13.0-1
 - Update to 1.13.0.
 - Use hardening flags for linking.
