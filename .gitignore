@@ -25,3 +25,11 @@
 /rustc-1.13.0-s390x-unknown-linux-gnu.tar.gz
 /rustc-1.13.0-x86_64-unknown-linux-gnu.tar.gz
 /rustc-1.14.0-src.tar.gz
+/rustc-1.15.1-src.tar.gz
+/rustc-1.14.0-aarch64-unknown-linux-gnu.tar.gz
+/rustc-1.14.0-armv7-unknown-linux-gnueabihf.tar.gz
+/rustc-1.14.0-i686-unknown-linux-gnu.tar.gz
+/rustc-1.14.0-powerpc64le-unknown-linux-gnu.tar.gz
+/rustc-1.14.0-powerpc64-unknown-linux-gnu.tar.gz
+/rustc-1.14.0-s390x-unknown-linux-gnu.tar.gz
+/rustc-1.14.0-x86_64-unknown-linux-gnu.tar.gz

@@ -8,8 +8,8 @@
 # To bootstrap from scratch, set the channel and date from src/stage0.txt
 # e.g. 1.10.0 wants rustc: 1.9.0-2016-05-24
 # or nightly wants some beta-YYYY-MM-DD
-%global bootstrap_channel 1.13.0
-%global bootstrap_date 2016-11-08
+%global bootstrap_channel 1.14.0
+%global bootstrap_date 2016-12-18
 
 # Only the specified arches will use bootstrap binaries.
 #global bootstrap_arches %%{rust_arches}
@@ -19,12 +19,21 @@
 # FIXME: LLVM 3.9 prefers shared linking now! Which is good, but next time we
 # *want* static we'll have to force it with "llvm-config --link-static".
 # See also https://github.com/rust-lang/rust/issues/36854
+# The new rustbuild accepts `--enable-llvm-link-shared`, else links static.
 %bcond_with llvm_static
+
+# We can also choose to just use Rust's bundled LLVM, in case the system LLVM
+# is insufficient.  Rust currently requires LLVM 3.7+.
+%if 0%{?rhel}
+%bcond_without bundled_llvm
+%else
+%bcond_with bundled_llvm
+%endif
 
 
 Name:           rust
-Version:        1.14.0
-Release:        2%{?dist}
+Version:        1.15.1
+Release:        1%{?dist}
 Summary:        The Rust Programming Language
 License:        (ASL 2.0 or MIT) and (BSD and ISC and MIT)
 # ^ written as: (rust itself) and (bundled libraries)
@@ -32,11 +41,11 @@ URL:            https://www.rust-lang.org
 ExclusiveArch:  %{rust_arches}
 
 %if "%{channel}" == "stable"
-%global rustc_package rustc-%{version}
+%global rustc_package rustc-%{version}-src
 %else
-%global rustc_package rustc-%{channel}
+%global rustc_package rustc-%{channel}-src
 %endif
-Source0:        https://static.rust-lang.org/dist/%{rustc_package}-src.tar.gz
+Source0:        https://static.rust-lang.org/dist/%{rustc_package}.tar.gz
 
 # Get the Rust triple for any arch.
 %{lua: function rust_triple(arch)
@@ -80,27 +89,36 @@ end}
 %global local_rust_root %{_builddir}/%{bootstrap_root}/rustc
 Provides:       bundled(%{name}-bootstrap) = %{bootstrap_channel}
 %else
-BuildRequires:  %{name} <= %{version}
 BuildRequires:  %{name} >= %{bootstrap_channel}
+BuildConflicts: %{name} > %{version}
 %global local_rust_root %{_prefix}
 %endif
 
 BuildRequires:  make
-BuildRequires:  cmake
 BuildRequires:  gcc
 BuildRequires:  gcc-c++
-BuildRequires:  llvm-devel
 BuildRequires:  ncurses-devel
 BuildRequires:  zlib-devel
 BuildRequires:  python2
 BuildRequires:  curl
 
+%if 0%{?epel}
+BuildRequires:  cmake3
+%else
+BuildRequires:  cmake
+%endif
+
+%if %with bundled_llvm
+Provides:       bundled(llvm) = 3.9
+%else
+BuildRequires:  llvm-devel >= 3.7
 %if %with llvm_static
 BuildRequires:  llvm-static
 BuildRequires:  libffi-devel
 %else
 # Make sure llvm-config doesn't see it.
 BuildConflicts: llvm-static
+%endif
 %endif
 
 # make check needs "ps" for src/test/run-pass/wait-forked-but-failed-child.rs
@@ -124,20 +142,25 @@ Requires:       %{name}-std-static%{?_isa} = %{version}-%{release}
 # https://github.com/rust-lang/rust/issues/11937
 Requires:       gcc
 
+%if 0%{?fedora} >= 26
+# Only non-bootstrap builds should require rust-rpm-macros, because that
+# requires cargo, which might not exist yet.
+%ifnarch %{bootstrap_arches}
+Requires:       rust-rpm-macros
+%endif
+%endif
+
 # ALL Rust libraries are private, because they don't keep an ABI.
 %global _privatelibs lib.*-[[:xdigit:]]{8}[.]so.*
 %global __provides_exclude ^(%{_privatelibs})$
 %global __requires_exclude ^(%{_privatelibs})$
 
-# Rust 1.12 metadata is now unallocated data (.rustc), and in theory it should
-# be fine to strip this entirely, since we don't want to expose Rust's unstable
-# ABI for linking.  However, eu-strip was then clobbering .dynsym when it tried
-# to remove the rust_metadata symbol referencing .rustc (rhbz1380961).
-# So for unfixed elfutils, we'll leave .rustc alone and only strip debuginfo.
-%if 0%{?fedora} < 25
+# While we don't want to encourage dynamic linking to Rust shared libraries, as
+# there's no stable ABI, we still need the unallocated metadata (.rustc) to
+# support custom-derive plugins like #[proc_macro_derive(Foo)].  But eu-strip is
+# very eager by default, so we have to limit it to -g, only debugging symbols.
 %global _find_debuginfo_opts -g
 %undefine _include_minidebuginfo
-%endif
 
 %description
 Rust is a systems programming language that runs blazingly fast, prevents
@@ -187,7 +210,9 @@ test -f '%{local_rust_root}/bin/rustc'
 
 # unbundle
 rm -rf src/jemalloc/
+%if %without bundled_llvm
 rm -rf src/llvm/
+%endif
 
 # extract bundled licenses for packaging
 cp src/rt/hoedown/LICENSE src/rt/hoedown/LICENSE-hoedown
@@ -201,7 +226,11 @@ sed -i.jemalloc -e '1i // ignore-test jemalloc is disabled' \
   src/test/compile-fail/allocator-rust-dylib-is-jemalloc.rs \
   src/test/run-pass/allocator-default.rs
 
-%if %with llvm_static
+%if 0%{?epel}
+sed -i.cmake -e 's/CFG_CMAKE cmake/&3/' configure
+%endif
+
+%if %{without bundled_llvm} && %{with llvm_static}
 # Static linking to distro LLVM needs to add -lffi
 # https://github.com/rust-lang/rust/issues/34486
 sed -i.ffi -e '$a #[link(name = "ffi")] extern {}' \
@@ -211,21 +240,11 @@ sed -i.ffi -e '$a #[link(name = "ffi")] extern {}' \
 
 %build
 
-%ifarch aarch64 %{mips} %{power64}
-%ifarch %{bootstrap_arches}
-# Upstream binaries have a 4k-paged jemalloc, which breaks with Fedora 64k pages.
-# See https://github.com/rust-lang/rust/issues/36994
-# Fixed by https://github.com/rust-lang/rust/issues/37392
-# So we can remove this when bootstrap reaches Rust 1.14.0.
-export MALLOC_CONF=lg_dirty_mult:-1
-%endif
-%endif
-
 # Use hardening ldflags.
 export RUSTFLAGS="-Clink-arg=-Wl,-z,relro,-z,now"
 
 # We're going to override --libdir when configuring to get rustlib into a
-# common path, but we'll properly relocate the shared libraries during install.
+# common path, but we'll fix the shared libraries during install.
 %global common_libdir %{_prefix}/lib
 %global rustlibdir %{common_libdir}/rustlib
 
@@ -233,10 +252,12 @@ export RUSTFLAGS="-Clink-arg=-Wl,-z,relro,-z,now"
   --libdir=%{common_libdir} \
   --build=%{rust_triple} --host=%{rust_triple} --target=%{rust_triple} \
   --enable-local-rust --local-rust-root=%{local_rust_root} \
-  --llvm-root=%{_prefix} --disable-codegen-tests \
+  %{!?with_bundled_llvm: --llvm-root=%{_prefix} --disable-codegen-tests \
+    %{!?with_llvm_static: --enable-llvm-link-shared } } \
   --disable-jemalloc \
   --disable-rpath \
   --enable-debuginfo \
+  --disable-rustbuild \
   --release-channel=%{channel}
 
 %make_build VERBOSE=1
@@ -245,40 +266,32 @@ export RUSTFLAGS="-Clink-arg=-Wl,-z,relro,-z,now"
 %install
 %make_install VERBOSE=1
 
-%if "%{common_libdir}" != "%{_libdir}"
-# Fix the installed location of shared libraries.
-# (should perhaps use a subdir and ld.so.conf script?)
-mkdir -p %{buildroot}/%{_libdir}
-mv -v -t %{buildroot}/%{_libdir} %{buildroot}/%{common_libdir}/*.so
-%endif
+# The libdir libraries are identical to those under rustlib/, and we need
+# the latter in place to support dynamic linking for compiler plugins, so we'll
+# point ldconfig to rustlib/ and remove the former.
+%global rust_ldconfig %{_sysconfdir}/ld.so.conf.d/%{name}-%{_arch}.conf
+mkdir -p %{buildroot}$(dirname %{rust_ldconfig})
+echo "%{rustlibdir}/%{rust_triple}/lib" > %{buildroot}%{rust_ldconfig}
+rm -v %{buildroot}%{common_libdir}/*.so
 
 # Remove installer artifacts (manifests, uninstall scripts, etc.)
-find %{buildroot}/%{rustlibdir} -maxdepth 1 -type f -exec rm -v '{}' '+'
+find %{buildroot}%{rustlibdir} -maxdepth 1 -type f -exec rm -v '{}' '+'
 
-# We don't want to ship the target shared libraries for lack of any Rust ABI.
-find %{buildroot}/%{rustlibdir} -type f -name '*.so' -exec rm -v '{}' '+'
-
-# The remaining shared libraries should be executable for debuginfo extraction.
-find %{buildroot}/%{_libdir}/ -type f -name '*.so' -exec chmod -v +x '{}' '+'
-
-# They also don't need the .rustc metadata anymore, so they won't support linking.
-# (but this needs the rhbz1380961 fix, or else eu-strip will clobber .dynsym)
-%if 0%{?fedora} >= 25
-find %{buildroot}/%{_libdir}/ -type f -name '*.so' -exec objcopy -R .rustc '{}' ';'
-%endif
+# The shared libraries should be executable for debuginfo extraction.
+find %{buildroot}%{rustlibdir}/ -type f -name '*.so' -exec chmod -v +x '{}' '+'
 
 # FIXME: __os_install_post will strip the rlibs
 # -- should we find a way to preserve debuginfo?
 
 # Remove unwanted documentation files (we already package them)
-rm -f %{buildroot}/%{_docdir}/%{name}/README.md
-rm -f %{buildroot}/%{_docdir}/%{name}/COPYRIGHT
-rm -f %{buildroot}/%{_docdir}/%{name}/LICENSE-APACHE
-rm -f %{buildroot}/%{_docdir}/%{name}/LICENSE-MIT
+rm -f %{buildroot}%{_docdir}/%{name}/README.md
+rm -f %{buildroot}%{_docdir}/%{name}/COPYRIGHT
+rm -f %{buildroot}%{_docdir}/%{name}/LICENSE-APACHE
+rm -f %{buildroot}%{_docdir}/%{name}/LICENSE-MIT
 
 # Sanitize the HTML documentation
-find %{buildroot}/%{_docdir}/%{name}/html -empty -delete
-find %{buildroot}/%{_docdir}/%{name}/html -type f -exec chmod -x '{}' '+'
+find %{buildroot}%{_docdir}/%{name}/html -empty -delete
+find %{buildroot}%{_docdir}/%{name}/html -type f -exec chmod -x '{}' '+'
 
 
 %check
@@ -301,7 +314,11 @@ make check-lite VERBOSE=1 -k || python2 src/etc/check-summary.py tmp/*.log || :
 %{_bindir}/rustdoc
 %{_mandir}/man1/rustc.1*
 %{_mandir}/man1/rustdoc.1*
-%{_libdir}/lib*
+%dir %{rustlibdir}
+%dir %{rustlibdir}/%{rust_triple}
+%dir %{rustlibdir}/%{rust_triple}/lib
+%{rustlibdir}/%{rust_triple}/lib/*.so
+%{rust_ldconfig}
 
 
 %files std-static
@@ -330,6 +347,12 @@ make check-lite VERBOSE=1 -k || python2 src/etc/check-summary.py tmp/*.log || :
 
 
 %changelog
+* Thu Feb 09 2017 Josh Stone <jistone@redhat.com> - 1.15.1-1
+- Update to 1.15.1.
+- Require rust-rpm-macros for new crate packaging.
+- Keep shared libraries under rustlib/, only debug-stripped.
+- Merge and clean up conditionals for epel7.
+
 * Fri Dec 23 2016 Josh Stone <jistone@redhat.com> - 1.14.0-2
 - Rebuild without bootstrap binaries.
 
