@@ -8,8 +8,10 @@
 # To bootstrap from scratch, set the channel and date from src/stage0.txt
 # e.g. 1.10.0 wants rustc: 1.9.0-2016-05-24
 # or nightly wants some beta-YYYY-MM-DD
-%global bootstrap_channel 1.14.0
-%global bootstrap_date 2016-12-18
+%global bootstrap_rust 1.15.1
+%global bootstrap_cargo 0.16.0
+%global bootstrap_channel %{bootstrap_rust}
+%global bootstrap_date 2017-02-09
 
 # Only the specified arches will use bootstrap binaries.
 #global bootstrap_arches %%{rust_arches}
@@ -30,9 +32,17 @@
 %bcond_with bundled_llvm
 %endif
 
+# LLDB isn't available everywhere...
+%if 0%{?rhel}
+%bcond_with lldb
+%else
+%bcond_without lldb
+%endif
+
+
 
 Name:           rust
-Version:        1.15.1
+Version:        1.16.0
 Release:        1%{?dist}
 Summary:        The Rust Programming Language
 License:        (ASL 2.0 or MIT) and (BSD and ISC and MIT)
@@ -46,6 +56,8 @@ ExclusiveArch:  %{rust_arches}
 %global rustc_package rustc-%{channel}-src
 %endif
 Source0:        https://static.rust-lang.org/dist/%{rustc_package}.tar.gz
+
+Patch1:         rust-1.16.0-configure-no-override.patch
 
 # Get the Rust triple for any arch.
 %{lua: function rust_triple(arch)
@@ -72,7 +84,7 @@ end}
     table.insert(bootstrap_arches, arch)
   end
   local base = rpm.expand("https://static.rust-lang.org/dist/%{bootstrap_date}"
-                          .."/rustc-%{bootstrap_channel}")
+                          .."/rust-%{bootstrap_channel}")
   local target_arch = rpm.expand("%{_target_cpu}")
   for i, arch in ipairs(bootstrap_arches) do
     print(string.format("Source%d: %s-%s.tar.gz\n",
@@ -85,11 +97,12 @@ end}
 %endif
 
 %ifarch %{bootstrap_arches}
-%global bootstrap_root rustc-%{bootstrap_channel}-%{rust_triple}
-%global local_rust_root %{_builddir}/%{bootstrap_root}/rustc
-Provides:       bundled(%{name}-bootstrap) = %{bootstrap_channel}
+%global bootstrap_root rust-%{bootstrap_channel}-%{rust_triple}
+%global local_rust_root %{_builddir}/%{bootstrap_root}%{_prefix}
+Provides:       bundled(%{name}-bootstrap) = %{bootstrap_rust}
 %else
-BuildRequires:  %{name} >= %{bootstrap_channel}
+BuildRequires:  cargo >= %{bootstrap_cargo}
+BuildRequires:  %{name} >= %{bootstrap_rust}
 BuildConflicts: %{name} > %{version}
 %global local_rust_root %{_prefix}
 %endif
@@ -124,6 +137,9 @@ BuildConflicts: llvm-static
 # make check needs "ps" for src/test/run-pass/wait-forked-but-failed-child.rs
 BuildRequires:  procps-ng
 
+# debuginfo-gdb tests need gdb
+BuildRequires:  gdb
+
 # TODO: work on unbundling these!
 Provides:       bundled(hoedown) = 3.0.5
 Provides:       bundled(jquery) = 2.1.4
@@ -151,7 +167,7 @@ Requires:       rust-rpm-macros
 %endif
 
 # ALL Rust libraries are private, because they don't keep an ABI.
-%global _privatelibs lib.*-[[:xdigit:]]{8}[.]so.*
+%global _privatelibs lib.*-[[:xdigit:]]*[.]so.*
 %global __provides_exclude ^(%{_privatelibs})$
 %global __requires_exclude ^(%{_privatelibs})$
 
@@ -187,6 +203,20 @@ This package includes the rust-gdb script, which allows easier debugging of Rust
 programs.
 
 
+%if %with lldb
+
+%package lldb
+Summary:        LLDB pretty printers for Rust
+BuildArch:      noarch
+Requires:       lldb
+
+%description lldb
+This package includes the rust-lldb script, which allows easier debugging of Rust
+programs.
+
+%endif
+
+
 %package doc
 Summary:        Documentation for Rust
 # NOT BuildArch:      noarch
@@ -203,6 +233,9 @@ its standard library.
 
 %ifarch %{bootstrap_arches}
 %setup -q -n %{bootstrap_root} -T -b %{bootstrap_source}
+./install.sh --components=cargo,rustc,rust-std-%{rust_triple} \
+  --prefix=./%{_prefix} --disable-ldconfig
+test -f '%{local_rust_root}/bin/cargo'
 test -f '%{local_rust_root}/bin/rustc'
 %endif
 
@@ -227,7 +260,9 @@ sed -i.jemalloc -e '1i // ignore-test jemalloc is disabled' \
   src/test/run-pass/allocator-default.rs
 
 %if 0%{?epel}
-sed -i.cmake -e 's/CFG_CMAKE cmake/&3/' configure
+mkdir -p cmake-bin
+ln -s /usr/bin/cmake3 cmake-bin/cmake
+%global cmake_path $PWD/cmake-bin
 %endif
 
 %if %{without bundled_llvm} && %{with llvm_static}
@@ -237,11 +272,16 @@ sed -i.ffi -e '$a #[link(name = "ffi")] extern {}' \
   src/librustc_llvm/lib.rs
 %endif
 
+%patch1 -p1 -b .no-override
+
 
 %build
 
+%{?cmake_path:export PATH=%{cmake_path}:$PATH}
+
 # Use hardening ldflags.
-export RUSTFLAGS="-Clink-arg=-Wl,-z,relro,-z,now"
+%global rustflags -Clink-arg=-Wl,-z,relro,-z,now
+export RUSTFLAGS="%{rustflags}"
 
 # We're going to override --libdir when configuring to get rustlib into a
 # common path, but we'll fix the shared libraries during install.
@@ -257,14 +297,17 @@ export RUSTFLAGS="-Clink-arg=-Wl,-z,relro,-z,now"
   --disable-jemalloc \
   --disable-rpath \
   --enable-debuginfo \
-  --disable-rustbuild \
+  --enable-vendor \
   --release-channel=%{channel}
 
-%make_build VERBOSE=1
+%make_build %{!?rhel:-Onone}
 
 
 %install
-%make_install VERBOSE=1
+%{?cmake_path:export PATH=%{cmake_path}:$PATH}
+export RUSTFLAGS="%{rustflags}"
+
+%make_install
 
 # The libdir libraries are identical to those under rustlib/, and we need
 # the latter in place to support dynamic linking for compiler plugins, so we'll
@@ -293,12 +336,20 @@ rm -f %{buildroot}%{_docdir}/%{name}/LICENSE-MIT
 find %{buildroot}%{_docdir}/%{name}/html -empty -delete
 find %{buildroot}%{_docdir}/%{name}/html -type f -exec chmod -x '{}' '+'
 
+%if %without lldb
+rm -f %{buildroot}%{_bindir}/rust-lldb
+rm -f %{buildroot}%{rustlibdir}/etc/lldb_*.py*
+%endif
+
 
 %check
+%{?cmake_path:export PATH=%{cmake_path}:$PATH}
+export RUSTFLAGS="%{rustflags}"
+
 # Note, many of the tests execute in parallel threads,
 # so it's better not to use a parallel make here.
 # The results are not stable on koji, so mask errors and just log it.
-make check-lite VERBOSE=1 -k || python2 src/etc/check-summary.py tmp/*.log || :
+make check || :
 
 
 %post -p /sbin/ldconfig
@@ -332,7 +383,18 @@ make check-lite VERBOSE=1 -k || python2 src/etc/check-summary.py tmp/*.log || :
 %{_bindir}/rust-gdb
 %dir %{rustlibdir}
 %dir %{rustlibdir}/etc
-%{rustlibdir}/etc/*.py*
+%{rustlibdir}/etc/debugger_*.py*
+%{rustlibdir}/etc/gdb_*.py*
+
+
+%if %with lldb
+%files lldb
+%{_bindir}/rust-lldb
+%dir %{rustlibdir}
+%dir %{rustlibdir}/etc
+%{rustlibdir}/etc/debugger_*.py*
+%{rustlibdir}/etc/lldb_*.py*
+%endif
 
 
 %files doc
@@ -347,6 +409,12 @@ make check-lite VERBOSE=1 -k || python2 src/etc/check-summary.py tmp/*.log || :
 
 
 %changelog
+* Thu Mar 16 2017 Josh Stone <jistone@redhat.com> - 1.16.0-1
+- Update to 1.16.0.
+- Use rustbuild instead of the old makefiles.
+- Update bootstrapping to include rust-std and cargo.
+- Add a rust-lldb subpackage.
+
 * Thu Feb 09 2017 Josh Stone <jistone@redhat.com> - 1.15.1-1
 - Update to 1.15.1.
 - Require rust-rpm-macros for new crate packaging.
