@@ -43,7 +43,7 @@
 
 Name:           rust
 Version:        1.16.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        The Rust Programming Language
 License:        (ASL 2.0 or MIT) and (BSD and ISC and MIT)
 # ^ written as: (rust itself) and (bundled libraries)
@@ -208,6 +208,9 @@ programs.
 %package lldb
 Summary:        LLDB pretty printers for Rust
 BuildArch:      noarch
+
+# LLDB is only available on some architectures
+ExclusiveArch:  %{arm} aarch64 %{ix86} x86_64  noarch
 Requires:       lldb
 
 %description lldb
@@ -409,6 +412,9 @@ make check || :
 
 
 %changelog
+* Fri Mar 17 2017 Josh Stone <jistone@redhat.com> - 1.16.0-2
+- Limit rust-lldb arches
+
 * Thu Mar 16 2017 Josh Stone <jistone@redhat.com> - 1.16.0-1
 - Update to 1.16.0.
 - Use rustbuild instead of the old makefiles.
