@@ -210,7 +210,7 @@ Summary:        LLDB pretty printers for Rust
 BuildArch:      noarch
 
 # LLDB is only available on some architectures
-ExclusiveArch:  %{arm} aarch64 %{ix86} x86_64  noarch
+ExclusiveArch:  %{arm} aarch64 %{ix86} x86_64
 Requires:       lldb
 
 %description lldb
