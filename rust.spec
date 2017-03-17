@@ -212,6 +212,7 @@ BuildArch:      noarch
 # LLDB is only available on some architectures
 ExclusiveArch:  %{arm} aarch64 %{ix86} x86_64
 Requires:       lldb
+Requires:       python-lldb
 
 %description lldb
 This package includes the rust-lldb script, which allows easier debugging of Rust
