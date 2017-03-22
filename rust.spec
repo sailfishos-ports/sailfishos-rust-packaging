@@ -120,13 +120,12 @@ BuildRequires:  zlib-devel
 BuildRequires:  python2
 BuildRequires:  curl
 
+%if %with bundled_llvm
 %if 0%{?epel}
 BuildRequires:  cmake3
 %else
 BuildRequires:  cmake
 %endif
-
-%if %with bundled_llvm
 Provides:       bundled(llvm) = 3.9
 %else
 BuildRequires:  llvm-devel >= 3.7
@@ -268,7 +267,7 @@ sed -i.jemalloc -e '1i // ignore-test jemalloc is disabled' \
   src/test/compile-fail/allocator-rust-dylib-is-jemalloc.rs \
   src/test/run-pass/allocator-default.rs
 
-%if 0%{?epel}
+%if %{with bundled_llvm} && 0%{?epel}
 mkdir -p cmake-bin
 ln -s /usr/bin/cmake3 cmake-bin/cmake
 %global cmake_path $PWD/cmake-bin
