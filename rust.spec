@@ -128,13 +128,20 @@ BuildRequires:  cmake
 %endif
 Provides:       bundled(llvm) = 3.9
 %else
-BuildRequires:  llvm-devel >= 3.7
+%if 0%{?fedora} >= 27
+%global llvm llvm3.9
+%global llvm_root %{_libdir}/%{llvm}
+%else
+%global llvm llvm
+%global llvm_root %{_prefix}
+%endif
+BuildRequires:  %{llvm}-devel >= 3.7
 %if %with llvm_static
-BuildRequires:  llvm-static
+BuildRequires:  %{llvm}-static
 BuildRequires:  libffi-devel
 %else
 # Make sure llvm-config doesn't see it.
-BuildConflicts: llvm-static
+BuildConflicts: %{llvm}-static
 %endif
 %endif
 
@@ -181,6 +188,14 @@ Requires:       rust-rpm-macros
 # very eager by default, so we have to limit it to -g, only debugging symbols.
 %global _find_debuginfo_opts -g
 %undefine _include_minidebuginfo
+
+# Use hardening ldflags.
+%global rustflags -Clink-arg=-Wl,-z,relro,-z,now
+
+%if %{without bundled_llvm} && "%{llvm_root}" != "%{_prefix}"
+# https://github.com/rust-lang/rust/issues/40717
+%global rustflags %{rustflags} -Clink-arg=-L%{llvm_root}/lib
+%endif
 
 %description
 Rust is a systems programming language that runs blazingly fast, prevents
@@ -286,9 +301,6 @@ sed -i.ffi -e '$a #[link(name = "ffi")] extern {}' \
 %build
 
 %{?cmake_path:export PATH=%{cmake_path}:$PATH}
-
-# Use hardening ldflags.
-%global rustflags -Clink-arg=-Wl,-z,relro,-z,now
 export RUSTFLAGS="%{rustflags}"
 
 # We're going to override --libdir when configuring to get rustlib into a
@@ -300,7 +312,7 @@ export RUSTFLAGS="%{rustflags}"
   --libdir=%{common_libdir} \
   --build=%{rust_triple} --host=%{rust_triple} --target=%{rust_triple} \
   --enable-local-rust --local-rust-root=%{local_rust_root} \
-  %{!?with_bundled_llvm: --llvm-root=%{_prefix} --disable-codegen-tests \
+  %{!?with_bundled_llvm: --llvm-root=%{llvm_root} --disable-codegen-tests \
     %{!?with_llvm_static: --enable-llvm-link-shared } } \
   --disable-jemalloc \
   --disable-rpath \
