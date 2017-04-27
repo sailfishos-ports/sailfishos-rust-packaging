@@ -8,10 +8,10 @@
 # To bootstrap from scratch, set the channel and date from src/stage0.txt
 # e.g. 1.10.0 wants rustc: 1.9.0-2016-05-24
 # or nightly wants some beta-YYYY-MM-DD
-%global bootstrap_rust 1.15.1
-%global bootstrap_cargo 0.16.0
+%global bootstrap_rust 1.16.0
+%global bootstrap_cargo 0.17.0
 %global bootstrap_channel %{bootstrap_rust}
-%global bootstrap_date 2017-02-09
+%global bootstrap_date 2017-03-11
 
 # Only the specified arches will use bootstrap binaries.
 #global bootstrap_arches %%{rust_arches}
@@ -26,7 +26,7 @@
 
 # We can also choose to just use Rust's bundled LLVM, in case the system LLVM
 # is insufficient.  Rust currently requires LLVM 3.7+.
-%if 0%{?rhel}
+%if 0%{?rhel} && !0%{?epel}
 %bcond_without bundled_llvm
 %else
 %bcond_with bundled_llvm
@@ -47,8 +47,8 @@
 
 
 Name:           rust
-Version:        1.16.0
-Release:        3%{?dist}
+Version:        1.17.0
+Release:        1%{?dist}
 Summary:        The Rust Programming Language
 License:        (ASL 2.0 or MIT) and (BSD and ISC and MIT)
 # ^ written as: (rust itself) and (bundled libraries)
@@ -128,7 +128,7 @@ BuildRequires:  cmake
 %endif
 Provides:       bundled(llvm) = 3.9
 %else
-%if 0%{?fedora} >= 27
+%if 0%{?fedora} >= 26 || 0%{?epel}
 %global llvm llvm3.9
 %global llvm_root %{_libdir}/%{llvm}
 %else
@@ -212,10 +212,19 @@ This package includes the standard libraries for building applications
 written in Rust.
 
 
+%package debugger-common
+Summary:        Common debugger pretty printers for Rust
+BuildArch:      noarch
+
+%description debugger-common
+This package includes the common functionality for %{name}-gdb and %{name}-lldb.
+
+
 %package gdb
 Summary:        GDB pretty printers for Rust
 BuildArch:      noarch
 Requires:       gdb
+Requires:       %{name}-debugger-common = %{version}-%{release}
 
 %description gdb
 This package includes the rust-gdb script, which allows easier debugging of Rust
@@ -232,6 +241,7 @@ Summary:        LLDB pretty printers for Rust
 
 Requires:       lldb
 Requires:       python-lldb
+Requires:       %{name}-debugger-common = %{version}-%{release}
 
 %description lldb
 This package includes the rust-lldb script, which allows easier debugging of Rust
@@ -320,14 +330,14 @@ export RUSTFLAGS="%{rustflags}"
   --enable-vendor \
   --release-channel=%{channel}
 
-%make_build %{!?rhel:-Onone}
+./x.py dist
 
 
 %install
 %{?cmake_path:export PATH=%{cmake_path}:$PATH}
 export RUSTFLAGS="%{rustflags}"
 
-%make_install
+DESTDIR=%{buildroot} ./x.py dist --install
 
 # The libdir libraries are identical to those under rustlib/, and we need
 # the latter in place to support dynamic linking for compiler plugins, so we'll
@@ -366,10 +376,8 @@ rm -f %{buildroot}%{rustlibdir}/etc/lldb_*.py*
 %{?cmake_path:export PATH=%{cmake_path}:$PATH}
 export RUSTFLAGS="%{rustflags}"
 
-# Note, many of the tests execute in parallel threads,
-# so it's better not to use a parallel make here.
 # The results are not stable on koji, so mask errors and just log it.
-make check || :
+./x.py test || :
 
 
 %post -p /sbin/ldconfig
@@ -399,36 +407,40 @@ make check || :
 %{rustlibdir}/%{rust_triple}/lib/*.rlib
 
 
-%files gdb
-%{_bindir}/rust-gdb
+%files debugger-common
 %dir %{rustlibdir}
 %dir %{rustlibdir}/etc
 %{rustlibdir}/etc/debugger_*.py*
+
+
+%files gdb
+%{_bindir}/rust-gdb
 %{rustlibdir}/etc/gdb_*.py*
 
 
 %if %with lldb
 %files lldb
 %{_bindir}/rust-lldb
-%dir %{rustlibdir}
-%dir %{rustlibdir}/etc
-%{rustlibdir}/etc/debugger_*.py*
 %{rustlibdir}/etc/lldb_*.py*
 %endif
 
 
 %files doc
+%docdir %{_docdir}/%{name}
 %dir %{_docdir}/%{name}
-%license %{_docdir}/%{name}/html/FiraSans-LICENSE.txt
-%license %{_docdir}/%{name}/html/Heuristica-LICENSE.txt
-%license %{_docdir}/%{name}/html/LICENSE-APACHE.txt
-%license %{_docdir}/%{name}/html/LICENSE-MIT.txt
-%license %{_docdir}/%{name}/html/SourceCodePro-LICENSE.txt
-%license %{_docdir}/%{name}/html/SourceSerifPro-LICENSE.txt
-%doc %{_docdir}/%{name}/html/
+%dir %{_docdir}/%{name}/html
+%{_docdir}/%{name}/html/*/
+%{_docdir}/%{name}/html/*.html
+%{_docdir}/%{name}/html/*.css
+%{_docdir}/%{name}/html/*.js
+%{_docdir}/%{name}/html/*.woff
+%license %{_docdir}/%{name}/html/*.txt
 
 
 %changelog
+* Thu Apr 27 2017 Josh Stone <jistone@redhat.com> - 1.17.0-1
+- Update to 1.17.0.
+
 * Mon Mar 20 2017 Josh Stone <jistone@redhat.com> - 1.16.0-3
 - Make rust-lldb arch-specific to deal with lldb deps
 
