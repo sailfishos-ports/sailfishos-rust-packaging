@@ -169,14 +169,6 @@ Requires:       %{name}-std-static%{?_isa} = %{version}-%{release}
 # https://github.com/rust-lang/rust/issues/11937
 Requires:       gcc
 
-%if 0%{?fedora} >= 26
-# Only non-bootstrap builds should require rust-rpm-macros, because that
-# requires cargo, which might not exist yet.
-%ifnarch %{bootstrap_arches}
-Requires:       rust-rpm-macros
-%endif
-%endif
-
 # ALL Rust libraries are private, because they don't keep an ABI.
 %global _privatelibs lib.*-[[:xdigit:]]*[.]so.*
 %global __provides_exclude ^(%{_privatelibs})$
