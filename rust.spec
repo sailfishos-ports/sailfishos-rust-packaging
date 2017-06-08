@@ -8,10 +8,10 @@
 # To bootstrap from scratch, set the channel and date from src/stage0.txt
 # e.g. 1.10.0 wants rustc: 1.9.0-2016-05-24
 # or nightly wants some beta-YYYY-MM-DD
-%global bootstrap_rust 1.16.0
-%global bootstrap_cargo 0.17.0
+%global bootstrap_rust 1.17.0
+%global bootstrap_cargo 0.18.0
 %global bootstrap_channel %{bootstrap_rust}
-%global bootstrap_date 2017-03-11
+%global bootstrap_date 2017-04-27
 
 # Only the specified arches will use bootstrap binaries.
 #global bootstrap_arches %%{rust_arches}
@@ -47,8 +47,8 @@
 
 
 Name:           rust
-Version:        1.17.0
-Release:        2%{?dist}
+Version:        1.18.0
+Release:        1%{?dist}
 Summary:        The Rust Programming Language
 License:        (ASL 2.0 or MIT) and (BSD and ISC and MIT)
 # ^ written as: (rust itself) and (bundled libraries)
@@ -62,7 +62,11 @@ ExclusiveArch:  %{rust_arches}
 %endif
 Source0:        https://static.rust-lang.org/dist/%{rustc_package}.tar.gz
 
+# Don't let configure clobber our debuginfo choice for stable releases.
 Patch1:         rust-1.16.0-configure-no-override.patch
+
+# Backport rust#42363 to run all tests
+Patch2:         rust-1.18.0-no-fail-fast.patch
 
 # Get the Rust triple for any arch.
 %{lua: function rust_triple(arch)
@@ -103,7 +107,7 @@ end}
 
 %ifarch %{bootstrap_arches}
 %global bootstrap_root rust-%{bootstrap_channel}-%{rust_triple}
-%global local_rust_root %{_builddir}/%{bootstrap_root}%{_prefix}
+%global local_rust_root %{_builddir}/%{bootstrap_root}/usr
 Provides:       bundled(%{name}-bootstrap) = %{bootstrap_rust}
 %else
 BuildRequires:  cargo >= %{bootstrap_cargo}
@@ -121,11 +125,7 @@ BuildRequires:  python2
 BuildRequires:  curl
 
 %if %with bundled_llvm
-%if 0%{?epel}
 BuildRequires:  cmake3
-%else
-BuildRequires:  cmake
-%endif
 Provides:       bundled(llvm) = 3.9
 %else
 %if 0%{?fedora} >= 26 || 0%{?epel}
@@ -173,6 +173,8 @@ Requires:       gcc
 %global _privatelibs lib.*-[[:xdigit:]]*[.]so.*
 %global __provides_exclude ^(%{_privatelibs})$
 %global __requires_exclude ^(%{_privatelibs})$
+%global __provides_exclude_from ^%{_docdir}/.*$
+%global __requires_exclude_from ^%{_docdir}/.*$
 
 # While we don't want to encourage dynamic linking to Rust shared libraries, as
 # there's no stable ABI, we still need the unallocated metadata (.rustc) to
@@ -186,7 +188,7 @@ Requires:       gcc
 
 %if %{without bundled_llvm} && "%{llvm_root}" != "%{_prefix}"
 # https://github.com/rust-lang/rust/issues/40717
-%global rustflags %{rustflags} -Clink-arg=-L%{llvm_root}/lib
+%global library_path $(%{llvm_root}/bin/llvm-config --libdir)
 %endif
 
 %description
@@ -259,7 +261,7 @@ its standard library.
 %ifarch %{bootstrap_arches}
 %setup -q -n %{bootstrap_root} -T -b %{bootstrap_source}
 ./install.sh --components=cargo,rustc,rust-std-%{rust_triple} \
-  --prefix=./%{_prefix} --disable-ldconfig
+  --prefix=%{local_rust_root} --disable-ldconfig
 test -f '%{local_rust_root}/bin/cargo'
 test -f '%{local_rust_root}/bin/rustc'
 %endif
@@ -298,12 +300,14 @@ sed -i.ffi -e '$a #[link(name = "ffi")] extern {}' \
 %endif
 
 %patch1 -p1 -b .no-override
+%patch2 -p1 -b .no-fail-fast
 
 
 %build
 
 %{?cmake_path:export PATH=%{cmake_path}:$PATH}
-export RUSTFLAGS="%{rustflags}"
+%{?library_path:export LIBRARY_PATH="%{library_path}"}
+%{?rustflags:export RUSTFLAGS="%{rustflags}"}
 
 # We're going to override --libdir when configuring to get rustlib into a
 # common path, but we'll fix the shared libraries during install.
@@ -327,7 +331,8 @@ export RUSTFLAGS="%{rustflags}"
 
 %install
 %{?cmake_path:export PATH=%{cmake_path}:$PATH}
-export RUSTFLAGS="%{rustflags}"
+%{?library_path:export LIBRARY_PATH="%{library_path}"}
+%{?rustflags:export RUSTFLAGS="%{rustflags}"}
 
 DESTDIR=%{buildroot} ./x.py dist --install
 
@@ -374,10 +379,11 @@ rm -f %{buildroot}%{rustlibdir}/etc/lldb_*.py*
 
 %check
 %{?cmake_path:export PATH=%{cmake_path}:$PATH}
-export RUSTFLAGS="%{rustflags}"
+%{?library_path:export LIBRARY_PATH="%{library_path}"}
+%{?rustflags:export RUSTFLAGS="%{rustflags}"}
 
 # The results are not stable on koji, so mask errors and just log it.
-./x.py test || :
+./x.py test --no-fail-fast || :
 
 
 %post -p /sbin/ldconfig
@@ -438,6 +444,9 @@ export RUSTFLAGS="%{rustflags}"
 
 
 %changelog
+* Thu Jun 08 2017 Josh Stone <jistone@redhat.com> - 1.18.0-1
+- Update to 1.18.0.
+
 * Mon May 08 2017 Josh Stone <jistone@redhat.com> - 1.17.0-2
 - Move shared libraries back to libdir and symlink in rustlib
 
