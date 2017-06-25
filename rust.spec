@@ -6,7 +6,7 @@
 %global rust_triple armv7-unknown-linux-gnueabihf
 %endif
 
-Name:           rust
+Name:           rust118
 Version:        1.18.0
 Release:        2
 Summary:        The Rust Programming Language
@@ -40,15 +40,15 @@ BuildRequires:  curl
 BuildRequires:  llvm-devel
 BuildRequires:  llvm-static
 BuildRequires:  libffi-devel
-BuildRequires:  rust >= 1.17
-BuildRequires:  rust-std-static >= 1.17
-BuildRequires:  cargo
+BuildRequires:  rust117
+BuildRequires:  rust117-std-static
+BuildRequires:  cargo017
 
 # debuginfo-gdb tests need gdb
 BuildRequires:  gdb
 
 # Always require our exact standard library
-Requires:       %{name}-std-static = %{version}-%{release}
+Requires:       rust118-std-static = %{version}-%{release}
 
 # The C compiler is needed at runtime just for linking.  Someday rustc might
 # invoke the linker directly, and then we'll only need binutils.
@@ -92,7 +92,7 @@ Summary:        Common debugger pretty printers for Rust
 BuildArch:      noarch
 
 %description debugger-common
-This package includes the common functionality for %{name}-gdb and %{name}-lldb.
+This package includes the common functionality for rust-gdb and rust-lldb.
 
 
 %package gdb
@@ -227,8 +227,8 @@ find %{buildroot}%{rustlibdir} -maxdepth 1 -type f -exec rm -v '{}' '+'
 # -- should we find a way to preserve debuginfo?
 
 # Sanitize the HTML documentation
-find %{buildroot}%{_docdir}/%{name}/html -empty -delete
-find %{buildroot}%{_docdir}/%{name}/html -type f -exec chmod -x '{}' '+'
+find %{buildroot}%{_docdir}/rust/html -empty -delete
+find %{buildroot}%{_docdir}/rust/html -type f -exec chmod -x '{}' '+'
 
 
 %check
@@ -249,10 +249,10 @@ find %{buildroot}%{_docdir}/%{name}/html -type f -exec chmod -x '{}' '+'
 
 
 %files
-%{_docdir}/%{name}/COPYRIGHT
-%{_docdir}/%{name}/LICENSE-APACHE 
-%{_docdir}/%{name}/LICENSE-MIT
-%{_docdir}/%{name}/README.md
+%{_docdir}/rust/COPYRIGHT
+%{_docdir}/rust/LICENSE-APACHE 
+%{_docdir}/rust/LICENSE-MIT
+%{_docdir}/rust/README.md
 %{_bindir}/rustc
 %{_bindir}/rustdoc
 %{_libdir}/*.so
@@ -288,14 +288,14 @@ find %{buildroot}%{_docdir}/%{name}/html -type f -exec chmod -x '{}' '+'
 
 
 %files doc
-%dir %{_docdir}/%{name}
-%dir %{_docdir}/%{name}/html
-%{_docdir}/%{name}/html/*/
-%{_docdir}/%{name}/html/*.html
-%{_docdir}/%{name}/html/*.css
-%{_docdir}/%{name}/html/*.js
-%{_docdir}/%{name}/html/*.woff
-%{_docdir}/%{name}/html/*.txt
+%dir %{_docdir}/rust
+%dir %{_docdir}/rust/html
+%{_docdir}/rust/html/*/
+%{_docdir}/rust/html/*.html
+%{_docdir}/rust/html/*.css
+%{_docdir}/rust/html/*.js
+%{_docdir}/rust/html/*.woff
+%{_docdir}/rust/html/*.txt
 
 
 %changelog
