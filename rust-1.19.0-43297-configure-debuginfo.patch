@@ -1,0 +1,38 @@
+From 253ff9c24f0e11323ae4f173cc620721fb322beb Mon Sep 17 00:00:00 2001
+From: Ximin Luo <infinity0@pwned.gg>
+Date: Mon, 17 Jul 2017 22:29:09 +0200
+Subject: [PATCH] configure: allow distros to disable debuginfo-only-std
+
+---
+ configure | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/configure b/configure
+index af59d5b0bb88..084f5bfdedbc 100755
+--- a/configure
++++ b/configure
+@@ -558,8 +558,8 @@ case "$CFG_RELEASE_CHANNEL" in
+           *-pc-windows-gnu)
+             ;;
+           *)
+-            CFG_ENABLE_DEBUGINFO_LINES=1
+-            CFG_ENABLE_DEBUGINFO_ONLY_STD=1
++            enable_if_not_disabled debuginfo-lines
++            enable_if_not_disabled debuginfo-only-std
+             ;;
+         esac
+ 
+@@ -570,8 +570,8 @@ case "$CFG_RELEASE_CHANNEL" in
+           *-pc-windows-gnu)
+             ;;
+           *)
+-            CFG_ENABLE_DEBUGINFO_LINES=1
+-            CFG_ENABLE_DEBUGINFO_ONLY_STD=1
++            enable_if_not_disabled debuginfo-lines
++            enable_if_not_disabled debuginfo-only-std
+             ;;
+         esac
+ 	;;
+-- 
+2.13.3
+
