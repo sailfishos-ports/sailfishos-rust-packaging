@@ -48,7 +48,7 @@
 
 Name:           rust
 Version:        1.19.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        The Rust Programming Language
 License:        (ASL 2.0 or MIT) and (BSD and ISC and MIT)
 # ^ written as: (rust itself) and (bundled libraries)
@@ -177,8 +177,13 @@ Requires:       gcc
 # there's no stable ABI, we still need the unallocated metadata (.rustc) to
 # support custom-derive plugins like #[proc_macro_derive(Foo)].  But eu-strip is
 # very eager by default, so we have to limit it to -g, only debugging symbols.
+%if 0%{?fedora} >= 27
+# Newer find-debuginfo.sh supports --keep-section, which is preferable. rhbz1465997
+%global _find_debuginfo_opts --keep-section .rustc
+%else
 %global _find_debuginfo_opts -g
 %undefine _include_minidebuginfo
+%endif
 
 # Use hardening ldflags.
 %global rustflags -Clink-arg=-Wl,-z,relro,-z,now
@@ -455,6 +460,9 @@ rm -f %{buildroot}%{rustlibdir}/etc/lldb_*.py*
 
 
 %changelog
+* Mon Jul 24 2017 Josh Stone <jistone@redhat.com> - 1.19.0-2
+- Use find-debuginfo.sh --keep-section .rustc
+
 * Thu Jul 20 2017 Josh Stone <jistone@redhat.com> - 1.19.0-1
 - Update to 1.19.0.
 
