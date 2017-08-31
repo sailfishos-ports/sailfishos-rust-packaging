@@ -8,10 +8,10 @@
 # To bootstrap from scratch, set the channel and date from src/stage0.txt
 # e.g. 1.10.0 wants rustc: 1.9.0-2016-05-24
 # or nightly wants some beta-YYYY-MM-DD
-%global bootstrap_rust 1.18.0
-%global bootstrap_cargo 0.19.0
+%global bootstrap_rust 1.19.0
+%global bootstrap_cargo 0.20.0
 %global bootstrap_channel %{bootstrap_rust}
-%global bootstrap_date 2017-06-08
+%global bootstrap_date 2017-07-20
 
 # Only the specified arches will use bootstrap binaries.
 #global bootstrap_arches %%{rust_arches}
@@ -47,8 +47,8 @@
 
 
 Name:           rust
-Version:        1.19.0
-Release:        4%{?dist}
+Version:        1.20.0
+Release:        1%{?dist}
 Summary:        The Rust Programming Language
 License:        (ASL 2.0 or MIT) and (BSD and ISC and MIT)
 # ^ written as: (rust itself) and (bundled libraries)
@@ -62,8 +62,8 @@ ExclusiveArch:  %{rust_arches}
 %endif
 Source0:        https://static.rust-lang.org/dist/%{rustc_package}.tar.xz
 
-Patch1:         rust-1.19.0-43072-stack-guard.patch
-Patch2:         rust-1.19.0-43297-configure-debuginfo.patch
+Patch1:         rust-1.19.0-43297-configure-debuginfo.patch
+Patch2:         rust-1.20.0-44203-exclude-compiler-rt-test.patch
 
 # Get the Rust triple for any arch.
 %{lua: function rust_triple(arch)
@@ -93,7 +93,7 @@ end}
                           .."/rust-%{bootstrap_channel}")
   local target_arch = rpm.expand("%{_target_cpu}")
   for i, arch in ipairs(bootstrap_arches) do
-    print(string.format("Source%d: %s-%s.tar.gz\n",
+    print(string.format("Source%d: %s-%s.tar.xz\n",
                         i, base, rust_triple(arch)))
     if arch == target_arch then
       rpm.define("bootstrap_source "..i)
@@ -123,7 +123,7 @@ BuildRequires:  curl
 
 %if %with bundled_llvm
 BuildRequires:  cmake3
-Provides:       bundled(llvm) = 3.9
+Provides:       bundled(llvm) = 4.0
 %else
 %if 0%{?epel}
 %global llvm llvm3.9
@@ -164,7 +164,7 @@ Requires:       %{name}-std-static%{?_isa} = %{version}-%{release}
 # The C compiler is needed at runtime just for linking.  Someday rustc might
 # invoke the linker directly, and then we'll only need binutils.
 # https://github.com/rust-lang/rust/issues/11937
-Requires:       gcc
+Requires:       /usr/bin/cc
 
 # ALL Rust libraries are private, because they don't keep an ABI.
 %global _privatelibs lib.*-[[:xdigit:]]*[.]so.*
@@ -258,6 +258,15 @@ This package includes HTML documentation for the Rust programming language and
 its standard library.
 
 
+%package src
+Summary:        Sources for the Rust standard library
+BuildArch:      noarch
+
+%description src
+This package includes source files for the Rust standard library.  It may be
+useful as a reference for code completion tools in various editors.
+
+
 %prep
 
 %ifarch %{bootstrap_arches}
@@ -270,8 +279,9 @@ test -f '%{local_rust_root}/bin/rustc'
 
 %setup -q -n %{rustc_package}
 
-# unbundle
-rm -rf src/jemalloc/
+# We're disabling jemalloc, but rust-src still wants it.
+# rm -rf src/jemalloc/
+
 %if %without bundled_llvm
 rm -rf src/llvm/
 %endif
@@ -280,13 +290,6 @@ rm -rf src/llvm/
 cp src/rt/hoedown/LICENSE src/rt/hoedown/LICENSE-hoedown
 sed -e '/*\//q' src/libbacktrace/backtrace.h \
   >src/libbacktrace/LICENSE-libbacktrace
-
-# These tests assume that alloc_jemalloc is present
-# https://github.com/rust-lang/rust/issues/35017
-sed -i.jemalloc -e '1i // ignore-test jemalloc is disabled' \
-  src/test/compile-fail/allocator-dylib-is-system.rs \
-  src/test/compile-fail/allocator-rust-dylib-is-jemalloc.rs \
-  src/test/run-pass/allocator-default.rs
 
 # This tests a problem of exponential growth, which seems to be less-reliably
 # fixed when running on older LLVM and/or some arches.  Just skip it for now.
@@ -306,8 +309,8 @@ sed -i.ffi -e '$a #[link(name = "ffi")] extern {}' \
   src/librustc_llvm/lib.rs
 %endif
 
-%patch1 -p1 -b .stack-guard
-%patch2 -p1 -b .debuginfo
+%patch1 -p1 -b .debuginfo
+%patch2 -p1 -b .compiler-rt
 
 # The configure macro will modify some autoconf-related files, which upsets
 # cargo when it tries to verify checksums in those files.  If we just truncate
@@ -351,6 +354,7 @@ find src/vendor -name .cargo-checksum.json \
 %{?rustflags:export RUSTFLAGS="%{rustflags}"}
 
 DESTDIR=%{buildroot} ./x.py install
+DESTDIR=%{buildroot} ./x.py install src
 
 
 # Make sure the shared libraries are in the proper libdir
@@ -459,7 +463,16 @@ rm -f %{buildroot}%{rustlibdir}/etc/lldb_*.py*
 %license %{_docdir}/%{name}/html/*.txt
 
 
+%files src
+%dir %{rustlibdir}
+%{rustlibdir}/src
+
+
 %changelog
+* Thu Aug 31 2017 Josh Stone <jistone@redhat.com> - 1.20.0-1
+- Update to 1.20.0.
+- Add a rust-src subpackage.
+
 * Thu Aug 03 2017 Fedora Release Engineering <releng@fedoraproject.org> - 1.19.0-4
 - Rebuilt for https://fedoraproject.org/wiki/Fedora_27_Binutils_Mass_Rebuild
 
