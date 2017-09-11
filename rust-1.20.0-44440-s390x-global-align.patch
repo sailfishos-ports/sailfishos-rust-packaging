@@ -1,0 +1,209 @@
+From 3ca86983df58daf0242b0618d3beb9ea917193e2 Mon Sep 17 00:00:00 2001
+From: bors <bors@rust-lang.org>
+Date: Mon, 11 Sep 2017 12:53:21 +0000
+Subject: [PATCH] Auto merge of #44440 - cuviper:min_global_align, r=japaric
+
+Add `TargetOptions::min_global_align`, with s390x at 16-bit
+
+The SystemZ `LALR` instruction provides PC-relative addressing for globals,
+but only to *even* addresses, so other compilers make sure that such
+globals are always 2-byte aligned.  In Clang, this is modeled with
+`TargetInfo::MinGlobalAlign`, and `TargetOptions::min_global_align` now
+serves the same purpose for rustc.
+
+In Clang, the only targets that set this are SystemZ, Lanai, and NVPTX, and
+the latter two don't have targets in rust master.
+
+Fixes #44411.
+r? @eddyb
+---
+ src/librustc_back/target/mod.rs                    |  6 ++++
+ .../target/s390x_unknown_linux_gnu.rs              |  1 +
+ src/librustc_trans/consts.rs                       | 24 ++++++++++++--
+ src/test/run-make/min-global-align/Makefile        | 22 +++++++++++++
+ .../run-make/min-global-align/min_global_align.rs  | 38 ++++++++++++++++++++++
+ 5 files changed, 89 insertions(+), 2 deletions(-)
+ create mode 100644 src/test/run-make/min-global-align/Makefile
+ create mode 100644 src/test/run-make/min-global-align/min_global_align.rs
+
+diff --git a/src/librustc_back/target/mod.rs b/src/librustc_back/target/mod.rs
+index edbbcf6f0b64..f88a3879d6c0 100644
+--- a/src/librustc_back/target/mod.rs
++++ b/src/librustc_back/target/mod.rs
+@@ -414,6 +414,9 @@ pub struct TargetOptions {
+ 
+     /// Whether or not stack probes (__rust_probestack) are enabled
+     pub stack_probes: bool,
++
++    /// The minimum alignment for global symbols.
++    pub min_global_align: Option<u64>,
+ }
+ 
+ impl Default for TargetOptions {
+@@ -472,6 +475,7 @@ impl Default for TargetOptions {
+             abi_blacklist: vec![],
+             crt_static_default: false,
+             stack_probes: false,
++            min_global_align: None,
+         }
+     }
+ }
+@@ -695,6 +699,7 @@ impl Target {
+         try!(key!(panic_strategy, PanicStrategy));
+         key!(crt_static_default, bool);
+         key!(stack_probes, bool);
++        key!(min_global_align, Option<u64>);
+ 
+         if let Some(array) = obj.find("abi-blacklist").and_then(Json::as_array) {
+             for name in array.iter().filter_map(|abi| abi.as_string()) {
+@@ -882,6 +887,7 @@ impl ToJson for Target {
+         target_option_val!(panic_strategy);
+         target_option_val!(crt_static_default);
+         target_option_val!(stack_probes);
++        target_option_val!(min_global_align);
+ 
+         if default.abi_blacklist != self.options.abi_blacklist {
+             d.insert("abi-blacklist".to_string(), self.options.abi_blacklist.iter()
+diff --git a/src/librustc_back/target/s390x_unknown_linux_gnu.rs b/src/librustc_back/target/s390x_unknown_linux_gnu.rs
+index 78a6bb7933d9..aad9effacd44 100644
+--- a/src/librustc_back/target/s390x_unknown_linux_gnu.rs
++++ b/src/librustc_back/target/s390x_unknown_linux_gnu.rs
+@@ -22,6 +22,7 @@ pub fn target() -> TargetResult {
+     base.max_atomic_width = Some(64);
+     // see #36994
+     base.exe_allocation_crate = None;
++    base.min_global_align = Some(16);
+ 
+     Ok(Target {
+         llvm_target: "s390x-unknown-linux-gnu".to_string(),
+diff --git a/src/librustc_trans/consts.rs b/src/librustc_trans/consts.rs
+index eac0a0625671..cfb29d848d0f 100644
+--- a/src/librustc_trans/consts.rs
++++ b/src/librustc_trans/consts.rs
+@@ -26,6 +26,7 @@ use rustc::ty;
+ 
+ use rustc::hir;
+ 
++use std::cmp;
+ use std::ffi::{CStr, CString};
+ use syntax::ast;
+ use syntax::attr;
+@@ -36,6 +37,25 @@ pub fn ptrcast(val: ValueRef, ty: Type) -> ValueRef {
+     }
+ }
+ 
++fn set_global_alignment(ccx: &CrateContext,
++                        gv: ValueRef,
++                        mut align: machine::llalign) {
++    // The target may require greater alignment for globals than the type does.
++    // Note: GCC and Clang also allow `__attribute__((aligned))` on variables,
++    // which can force it to be smaller.  Rust doesn't support this yet.
++    if let Some(min) = ccx.sess().target.target.options.min_global_align {
++        match ty::layout::Align::from_bits(min, min) {
++            Ok(min) => align = cmp::max(align, min.abi() as machine::llalign),
++            Err(err) => {
++                ccx.sess().err(&format!("invalid minimum global alignment: {}", err));
++            }
++        }
++    }
++    unsafe {
++        llvm::LLVMSetAlignment(gv, align);
++    }
++}
++
+ pub fn addr_of_mut(ccx: &CrateContext,
+                    cv: ValueRef,
+                    align: machine::llalign,
+@@ -47,7 +67,7 @@ pub fn addr_of_mut(ccx: &CrateContext,
+             bug!("symbol `{}` is already defined", name);
+         });
+         llvm::LLVMSetInitializer(gv, cv);
+-        llvm::LLVMSetAlignment(gv, align);
++        set_global_alignment(ccx, gv, align);
+         llvm::LLVMRustSetLinkage(gv, llvm::Linkage::InternalLinkage);
+         SetUnnamedAddr(gv, true);
+         gv
+@@ -251,7 +271,7 @@ pub fn trans_static<'a, 'tcx>(ccx: &CrateContext<'a, 'tcx>,
+             ccx.statics_to_rauw().borrow_mut().push((g, new_g));
+             new_g
+         };
+-        llvm::LLVMSetAlignment(g, ccx.align_of(ty));
++        set_global_alignment(ccx, g, ccx.align_of(ty));
+         llvm::LLVMSetInitializer(g, v);
+ 
+         // As an optimization, all shared statics which do not have interior
+diff --git a/src/test/run-make/min-global-align/Makefile b/src/test/run-make/min-global-align/Makefile
+new file mode 100644
+index 000000000000..2eacc36f380d
+--- /dev/null
++++ b/src/test/run-make/min-global-align/Makefile
+@@ -0,0 +1,22 @@
++-include ../tools.mk
++
++# This tests ensure that global variables respect the target minimum alignment.
++# The three bools `STATIC_BOOL`, `STATIC_MUT_BOOL`, and `CONST_BOOL` all have
++# type-alignment of 1, but some targets require greater global alignment.
++
++SRC = min_global_align.rs
++LL = $(TMPDIR)/min_global_align.ll
++
++all:
++ifeq ($(UNAME),Linux)
++# Most targets are happy with default alignment -- take i686 for example.
++ifeq ($(filter x86,$(LLVM_COMPONENTS)),x86)
++	$(RUSTC) --target=i686-unknown-linux-gnu --emit=llvm-ir $(SRC)
++	[ "$$(grep -c 'align 1' "$(LL)")" -eq "3" ]
++endif
++# SystemZ requires even alignment for PC-relative addressing.
++ifeq ($(filter systemz,$(LLVM_COMPONENTS)),systemz)
++	$(RUSTC) --target=s390x-unknown-linux-gnu --emit=llvm-ir $(SRC)
++	[ "$$(grep -c 'align 2' "$(LL)")" -eq "3" ]
++endif
++endif
+diff --git a/src/test/run-make/min-global-align/min_global_align.rs b/src/test/run-make/min-global-align/min_global_align.rs
+new file mode 100644
+index 000000000000..3d4f9001a747
+--- /dev/null
++++ b/src/test/run-make/min-global-align/min_global_align.rs
+@@ -0,0 +1,38 @@
++// Copyright 2017 The Rust Project Developers. See the COPYRIGHT
++// file at the top-level directory of this distribution and at
++// http://rust-lang.org/COPYRIGHT.
++//
++// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
++// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
++// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
++// option. This file may not be copied, modified, or distributed
++// except according to those terms.
++
++#![feature(no_core, lang_items)]
++#![crate_type="rlib"]
++#![no_core]
++
++pub static STATIC_BOOL: bool = true;
++
++pub static mut STATIC_MUT_BOOL: bool = true;
++
++const CONST_BOOL: bool = true;
++pub static CONST_BOOL_REF: &'static bool = &CONST_BOOL;
++
++
++#[lang = "sized"]
++trait Sized {}
++
++#[lang = "copy"]
++trait Copy {}
++
++#[lang = "freeze"]
++trait Freeze {}
++
++#[lang = "sync"]
++trait Sync {}
++impl Sync for bool {}
++impl Sync for &'static bool {}
++
++#[lang="drop_in_place"]
++pub unsafe fn drop_in_place<T: ?Sized>(_: *mut T) { }
+-- 
+2.13.5
+

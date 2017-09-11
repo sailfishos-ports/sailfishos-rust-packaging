@@ -48,7 +48,7 @@
 
 Name:           rust
 Version:        1.20.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        The Rust Programming Language
 License:        (ASL 2.0 or MIT) and (BSD and ISC and MIT)
 # ^ written as: (rust itself) and (bundled libraries)
@@ -64,6 +64,8 @@ Source0:        https://static.rust-lang.org/dist/%{rustc_package}.tar.xz
 
 Patch1:         rust-1.19.0-43297-configure-debuginfo.patch
 Patch2:         rust-1.20.0-44203-exclude-compiler-rt-test.patch
+Patch3:         rust-1.20.0-44066-ppc64-struct-abi.patch
+Patch4:         rust-1.20.0-44440-s390x-global-align.patch
 
 # Get the Rust triple for any arch.
 %{lua: function rust_triple(arch)
@@ -311,6 +313,8 @@ sed -i.ffi -e '$a #[link(name = "ffi")] extern {}' \
 
 %patch1 -p1 -b .debuginfo
 %patch2 -p1 -b .compiler-rt
+%patch3 -p1 -b .ppc64-struct-abi
+%patch4 -p1 -b .s390x-global-align
 
 # The configure macro will modify some autoconf-related files, which upsets
 # cargo when it tries to verify checksums in those files.  If we just truncate
@@ -469,6 +473,9 @@ rm -f %{buildroot}%{rustlibdir}/etc/lldb_*.py*
 
 
 %changelog
+* Mon Sep 11 2017 Josh Stone <jistone@redhat.com> - 1.20.0-2
+- ABI fixes for ppc64 and s390x.
+
 * Thu Aug 31 2017 Josh Stone <jistone@redhat.com> - 1.20.0-1
 - Update to 1.20.0.
 - Add a rust-src subpackage.
