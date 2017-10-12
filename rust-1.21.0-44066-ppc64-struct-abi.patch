@@ -1,4 +1,4 @@
-From 6f680d06544edae491d2281d89b0b93efcdd6143 Mon Sep 17 00:00:00 2001
+From bc3a71ed00af01855b0ae8908ae271b83eca34f6 Mon Sep 17 00:00:00 2001
 From: bors <bors@rust-lang.org>
 Date: Sat, 2 Sep 2017 19:46:51 +0000
 Subject: [PATCH] Auto merge of #44066 - cuviper:powerpc64-extern-abi,
@@ -35,7 +35,7 @@ formerly-failing tests now pass on powerpc64:
  6 files changed, 151 insertions(+), 44 deletions(-)
 
 diff --git a/src/librustc_trans/cabi_powerpc64.rs b/src/librustc_trans/cabi_powerpc64.rs
-index c4f8d0b4b963..a3780c8cfa92 100644
+index 5c695387236f..fb5472eb6ae1 100644
 --- a/src/librustc_trans/cabi_powerpc64.rs
 +++ b/src/librustc_trans/cabi_powerpc64.rs
 @@ -14,14 +14,26 @@
@@ -44,7 +44,7 @@ index c4f8d0b4b963..a3780c8cfa92 100644
  use context::CrateContext;
 +use rustc::ty::layout;
  
--fn is_homogenous_aggregate<'a, 'tcx>(ccx: &CrateContext<'a, 'tcx>, arg: &mut ArgType<'tcx>)
+-fn is_homogeneous_aggregate<'a, 'tcx>(ccx: &CrateContext<'a, 'tcx>, arg: &mut ArgType<'tcx>)
 +#[derive(Debug, Clone, Copy, PartialEq)]
 +enum ABI {
 +    ELFv1, // original ABI used for powerpc64 (big-endian)
@@ -52,11 +52,11 @@ index c4f8d0b4b963..a3780c8cfa92 100644
 +}
 +use self::ABI::*;
 +
-+fn is_homogenous_aggregate<'a, 'tcx>(ccx: &CrateContext<'a, 'tcx>,
-+                                     arg: &mut ArgType<'tcx>,
-+                                     abi: ABI)
++fn is_homogeneous_aggregate<'a, 'tcx>(ccx: &CrateContext<'a, 'tcx>,
++                                      arg: &mut ArgType<'tcx>,
++                                      abi: ABI)
                                       -> Option<Uniform> {
-     arg.layout.homogenous_aggregate(ccx).and_then(|unit| {
+     arg.layout.homogeneous_aggregate(ccx).and_then(|unit| {
          let size = arg.layout.size(ccx);
  
 -        // Ensure we have at most eight uniquely addressable members.
@@ -68,7 +68,7 @@ index c4f8d0b4b963..a3780c8cfa92 100644
              return None;
          }
  
-@@ -42,21 +54,23 @@ fn is_homogenous_aggregate<'a, 'tcx>(ccx: &CrateContext<'a, 'tcx>, arg: &mut Arg
+@@ -42,21 +54,23 @@ fn is_homogeneous_aggregate<'a, 'tcx>(ccx: &CrateContext<'a, 'tcx>, arg: &mut Ar
      })
  }
  
@@ -87,8 +87,8 @@ index c4f8d0b4b963..a3780c8cfa92 100644
 +        return;
      }
  
--    if let Some(uniform) = is_homogenous_aggregate(ccx, ret) {
-+    if let Some(uniform) = is_homogenous_aggregate(ccx, ret, abi) {
+-    if let Some(uniform) = is_homogeneous_aggregate(ccx, ret) {
++    if let Some(uniform) = is_homogeneous_aggregate(ccx, ret, abi) {
          ret.cast_to(ccx, uniform);
          return;
      }
@@ -107,8 +107,8 @@ index c4f8d0b4b963..a3780c8cfa92 100644
          return;
      }
  
--    if let Some(uniform) = is_homogenous_aggregate(ccx, arg) {
-+    if let Some(uniform) = is_homogenous_aggregate(ccx, arg, abi) {
+-    if let Some(uniform) = is_homogeneous_aggregate(ccx, arg) {
++    if let Some(uniform) = is_homogeneous_aggregate(ccx, arg, abi) {
          arg.cast_to(ccx, uniform);
          return;
      }
@@ -159,7 +159,7 @@ index c4f8d0b4b963..a3780c8cfa92 100644
      }
  }
 diff --git a/src/librustc_trans/cabi_x86.rs b/src/librustc_trans/cabi_x86.rs
-index 9f5520dabe33..05932ef2de80 100644
+index 8b024b8c97fa..49634d6e78ce 100644
 --- a/src/librustc_trans/cabi_x86.rs
 +++ b/src/librustc_trans/cabi_x86.rs
 @@ -11,12 +11,30 @@

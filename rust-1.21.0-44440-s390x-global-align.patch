@@ -1,7 +1,8 @@
-From 3ca86983df58daf0242b0618d3beb9ea917193e2 Mon Sep 17 00:00:00 2001
+From 0f5ee28213a73733e6811b176c89ecececfe9cbc Mon Sep 17 00:00:00 2001
 From: bors <bors@rust-lang.org>
 Date: Mon, 11 Sep 2017 12:53:21 +0000
-Subject: [PATCH] Auto merge of #44440 - cuviper:min_global_align, r=japaric
+Subject: [PATCH] Auto merge of #44440 - cuviper:min_global_align,
+ r=japaric
 
 Add `TargetOptions::min_global_align`, with s390x at 16-bit
 
@@ -27,10 +28,10 @@ r? @eddyb
  create mode 100644 src/test/run-make/min-global-align/min_global_align.rs
 
 diff --git a/src/librustc_back/target/mod.rs b/src/librustc_back/target/mod.rs
-index edbbcf6f0b64..f88a3879d6c0 100644
+index 130e1b695dbd..301cf3f8c820 100644
 --- a/src/librustc_back/target/mod.rs
 +++ b/src/librustc_back/target/mod.rs
-@@ -414,6 +414,9 @@ pub struct TargetOptions {
+@@ -425,6 +425,9 @@ pub struct TargetOptions {
  
      /// Whether or not stack probes (__rust_probestack) are enabled
      pub stack_probes: bool,
@@ -40,25 +41,25 @@ index edbbcf6f0b64..f88a3879d6c0 100644
  }
  
  impl Default for TargetOptions {
-@@ -472,6 +475,7 @@ impl Default for TargetOptions {
-             abi_blacklist: vec![],
+@@ -486,6 +489,7 @@ impl Default for TargetOptions {
              crt_static_default: false,
+             crt_static_respected: false,
              stack_probes: false,
 +            min_global_align: None,
          }
      }
  }
-@@ -695,6 +699,7 @@ impl Target {
-         try!(key!(panic_strategy, PanicStrategy));
+@@ -724,6 +728,7 @@ impl Target {
          key!(crt_static_default, bool);
+         key!(crt_static_respected, bool);
          key!(stack_probes, bool);
 +        key!(min_global_align, Option<u64>);
  
          if let Some(array) = obj.find("abi-blacklist").and_then(Json::as_array) {
              for name in array.iter().filter_map(|abi| abi.as_string()) {
-@@ -882,6 +887,7 @@ impl ToJson for Target {
-         target_option_val!(panic_strategy);
+@@ -914,6 +919,7 @@ impl ToJson for Target {
          target_option_val!(crt_static_default);
+         target_option_val!(crt_static_respected);
          target_option_val!(stack_probes);
 +        target_option_val!(min_global_align);
  
@@ -77,7 +78,7 @@ index 78a6bb7933d9..aad9effacd44 100644
      Ok(Target {
          llvm_target: "s390x-unknown-linux-gnu".to_string(),
 diff --git a/src/librustc_trans/consts.rs b/src/librustc_trans/consts.rs
-index eac0a0625671..cfb29d848d0f 100644
+index 310cd6fe9559..f7f9b9386841 100644
 --- a/src/librustc_trans/consts.rs
 +++ b/src/librustc_trans/consts.rs
 @@ -26,6 +26,7 @@ use rustc::ty;
@@ -88,7 +89,7 @@ index eac0a0625671..cfb29d848d0f 100644
  use std::ffi::{CStr, CString};
  use syntax::ast;
  use syntax::attr;
-@@ -36,6 +37,25 @@ pub fn ptrcast(val: ValueRef, ty: Type) -> ValueRef {
+@@ -42,6 +43,25 @@ pub fn bitcast(val: ValueRef, ty: Type) -> ValueRef {
      }
  }
  
@@ -114,7 +115,7 @@ index eac0a0625671..cfb29d848d0f 100644
  pub fn addr_of_mut(ccx: &CrateContext,
                     cv: ValueRef,
                     align: machine::llalign,
-@@ -47,7 +67,7 @@ pub fn addr_of_mut(ccx: &CrateContext,
+@@ -53,7 +73,7 @@ pub fn addr_of_mut(ccx: &CrateContext,
              bug!("symbol `{}` is already defined", name);
          });
          llvm::LLVMSetInitializer(gv, cv);
@@ -123,7 +124,7 @@ index eac0a0625671..cfb29d848d0f 100644
          llvm::LLVMRustSetLinkage(gv, llvm::Linkage::InternalLinkage);
          SetUnnamedAddr(gv, true);
          gv
-@@ -251,7 +271,7 @@ pub fn trans_static<'a, 'tcx>(ccx: &CrateContext<'a, 'tcx>,
+@@ -271,7 +291,7 @@ pub fn trans_static<'a, 'tcx>(ccx: &CrateContext<'a, 'tcx>,
              ccx.statics_to_rauw().borrow_mut().push((g, new_g));
              new_g
          };
